@@ -7,20 +7,114 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="topbar">
-  <button id="newPuzzleBtn" class="icon-btn" aria-label="Новый сканворд">↻</button>
-  <div class="clue-preview" id="cluePreview">Выберите клетку с подсказкой</div>
-  <button id="checkBtn" class="icon-btn" aria-label="Проверить">✓</button>
-</header>
 
-<main class="board-wrap">
-  <div id="board" class="board"></div>
-</main>
+<!-- Главное меню -->
+<section id="screen-menu" class="screen">
+  <h1 class="app-title">Сканворды</h1>
+  <div class="menu-buttons">
+    <button id="playBtn" class="primary-btn wide">ИГРАТЬ</button>
+    <button id="libraryBtn" class="secondary-btn wide">ЗАГРУЗИТЬ</button>
+    <button id="settingsBtn" class="secondary-btn wide">НАСТРОЙКИ</button>
+    <button id="exitBtn" class="secondary-btn wide">ВЫХОД</button>
+  </div>
+</section>
+
+<!-- Библиотека пазлов -->
+<section id="screen-library" class="screen hidden">
+  <header class="subheader">
+    <button class="back-btn" data-back="screen-menu">←</button>
+    <span class="subheader-title">Загрузить</span>
+  </header>
+  <div class="tabs" id="libraryTabs">
+    <button class="tab active" data-filter="all">Все</button>
+    <button class="tab" data-filter="new">Новые</button>
+    <button class="tab" data-filter="started">Начатые</button>
+    <button class="tab" data-filter="finished">Законченные</button>
+  </div>
+  <div class="puzzle-list" id="puzzleList"></div>
+  <div class="pagination">
+    <button id="pagePrev" class="page-btn">«</button>
+    <span id="pageIndicator" class="page-indicator">1/1</span>
+    <button id="pageNext" class="page-btn">»</button>
+  </div>
+</section>
+
+<!-- Настройки: корень -->
+<section id="screen-settings" class="screen hidden">
+  <header class="subheader">
+    <button class="back-btn" data-back="screen-menu">←</button>
+    <span class="subheader-title">Настройки</span>
+  </header>
+  <div class="settings-list">
+    <button class="settings-item" id="openControlsBtn">
+      <span class="settings-icon">🔧</span>
+      <span>Управление</span>
+    </button>
+  </div>
+</section>
+
+<!-- Настройки: управление -->
+<section id="screen-settings-controls" class="screen hidden">
+  <header class="subheader">
+    <button class="back-btn" data-back="screen-settings">←</button>
+    <span class="subheader-title">Управление</span>
+  </header>
+  <div class="settings-controls" id="settingsControls">
+    <label class="setting-row">
+      <span>Переходить к следующему слову на пересечении с текущим выбранным</span>
+      <input type="checkbox" id="setJumpOnIntersection">
+    </label>
+
+    <div class="setting-group-title">Режим игры</div>
+    <label class="setting-row">
+      <span>«Телефон» — верные буквы сразу красятся зелёным, считаются угаданные слова</span>
+      <input type="radio" name="mode" id="setModePhone" value="phone">
+    </label>
+    <label class="setting-row sub">
+      <span>Переходить к следующему слову при угадывании</span>
+      <input type="checkbox" id="setAutoAdvance">
+    </label>
+    <label class="setting-row sub">
+      <span>Закрывать клавиатуру при угадывании слова</span>
+      <input type="checkbox" id="setCloseKeyboard">
+    </label>
+    <label class="setting-row sub">
+      <span>Выделять подсказки отгаданных слов</span>
+      <input type="checkbox" id="setHighlightSolved">
+    </label>
+    <label class="setting-row">
+      <span>«Газета» — никаких подсказок по ходу дела, проверка в конце</span>
+      <input type="radio" name="mode" id="setModeNewspaper" value="newspaper">
+    </label>
+  </div>
+</section>
+
+<!-- Игра -->
+<section id="screen-game" class="screen hidden">
+  <header class="topbar">
+    <button class="back-btn" data-back="screen-menu">←</button>
+    <button id="hintBtn" class="hint-btn">💡 <span id="hintCount">0</span></button>
+    <span class="puzzle-progress" id="puzzleProgress">№ 0: 0/0</span>
+  </header>
+
+  <main class="board-wrap" id="boardWrap">
+    <div id="board" class="board"></div>
+  </main>
+
+  <div class="clue-bar" id="clueBar">
+    <button id="cluePrevBtn" class="clue-nav">‹</button>
+    <div class="clue-text" id="clueText">Выберите клетку с подсказкой</div>
+    <button id="clueNextBtn" class="clue-nav">›</button>
+    <button id="clueCloseBtn" class="clue-close">✕</button>
+  </div>
+
+  <div class="keyboard" id="keyboard"></div>
+</section>
 
 <div id="winOverlay" class="win-overlay hidden">
   <div class="win-card">
     <div class="win-title">Разгадано!</div>
-    <button id="winNewBtn" class="primary-btn">Новый сканворд</button>
+    <button id="winLibraryBtn" class="primary-btn">К библиотеке</button>
   </div>
 </div>
 
