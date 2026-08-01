@@ -282,9 +282,49 @@ function stepWord(delta) {
 }
 
 // ---------- Рендер сетки ----------
+const CELL_MIN = 16, CELL_MAX = 70;
+let currentCellSize = 30;
+
+function applyCellSize() {
+  document.documentElement.style.setProperty("--cell-size", currentCellSize + "px");
+}
+
 function fitCellSize() {
-  const size = window.innerWidth < 380 ? 26 : 30;
-  document.documentElement.style.setProperty("--cell-size", size + "px");
+  currentCellSize = window.innerWidth < 380 ? 26 : 30;
+  applyCellSize();
+}
+
+// Пинч именно по игровому полю — кнопки/клавиатура масштаб страницы не трогает
+// (viewport зафиксирован user-scalable=no, чтобы не зумилась вся вёрстка).
+function touchDistance(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+let pinchStartDist = null, pinchStartSize = null;
+
+function wirePinchZoom() {
+  const wrap = document.getElementById("boardWrap");
+  wrap.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) {
+      pinchStartDist = touchDistance(e.touches);
+      pinchStartSize = currentCellSize;
+    }
+  }, { passive: true });
+
+  wrap.addEventListener("touchmove", (e) => {
+    if (e.touches.length === 2 && pinchStartDist) {
+      e.preventDefault();
+      const ratio = touchDistance(e.touches) / pinchStartDist;
+      currentCellSize = Math.max(CELL_MIN, Math.min(CELL_MAX, Math.round(pinchStartSize * ratio)));
+      applyCellSize();
+    }
+  }, { passive: false });
+
+  wrap.addEventListener("touchend", (e) => {
+    if (e.touches.length < 2) pinchStartDist = null;
+  }, { passive: true });
 }
 
 function renderBoard() {
@@ -523,6 +563,7 @@ window.addEventListener("resize", () => { if (game) fitCellSize(); });
 // ---------- Инициализация ----------
 async function init() {
   renderKeyboard();
+  wirePinchZoom();
   try {
     const res = await fetch("puzzles.json");
     PUZZLES = await res.json();
