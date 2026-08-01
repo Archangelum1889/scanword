@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Сканворды</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <button id="newPuzzleBtn" class="icon-btn" aria-label="Новый сканворд">↻</button>
+  <div class="clue-preview" id="cluePreview">Выберите клетку с подсказкой</div>
+  <button id="checkBtn" class="icon-btn" aria-label="Проверить">✓</button>
+</header>
+
+<main class="board-wrap">
+  <div id="board" class="board"></div>
+</main>
+
+<div id="winOverlay" class="win-overlay hidden">
+  <div class="win-card">
+    <div class="win-title">Разгадано!</div>
+    <button id="winNewBtn" class="primary-btn">Новый сканворд</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
