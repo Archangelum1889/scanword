@@ -9,8 +9,10 @@ const PUZZLE_COUNT = 30;
 const MIN_WORDS = 40;
 const MAX_WORDS = 60;
 
-// Подобрано эмпирически: даёт компактную сетку без лишнего запаса на всём диапазоне 40-60 слов
-function spanFor(target) { return Math.round(target * 0.62) + 6; }
+// Подобрано эмпирически: щедрый запас (×0.62) давал заполнение сетки ~30%
+// (клетки терялись на пустоту) — этот множитель держит ~45% при том же
+// целевом числе слов, для мобильного экрана это принципиально
+function spanFor(target) { return Math.round(target * 0.42) + 4; }
 
 const puzzles = [];
 for (let i = 1; i <= PUZZLE_COUNT; i++) {
@@ -23,7 +25,10 @@ for (let i = 1; i <= PUZZLE_COUNT; i++) {
     if (retry.wordCount > puzzle.wordCount) puzzle = retry;
   }
   puzzles.push(Object.assign({ id: i, number: i }, puzzle));
-  process.stdout.write(`#${i}: цель ${target}, слов ${puzzle.wordCount}, сетка ${puzzle.rows}x${puzzle.cols}\n`);
+  let letters = 0;
+  for (const row of puzzle.grid) for (const c of row) if (c.type === "letter") letters++;
+  const fill = ((letters / (puzzle.rows * puzzle.cols)) * 100).toFixed(0);
+  process.stdout.write(`#${i}: цель ${target}, слов ${puzzle.wordCount}, сетка ${puzzle.rows}x${puzzle.cols}, заполнение ${fill}%\n`);
 }
 
 const counts = puzzles.map((p) => p.wordCount);
