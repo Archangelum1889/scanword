@@ -568,7 +568,7 @@ async function init() {
   renderKeyboard();
   wirePinchZoom();
   try {
-    const res = await fetch("puzzles.json");
+    const res = await fetch("puzzles.json", { cache: "no-store" });
     PUZZLES = await res.json();
   } catch (e) {
     PUZZLES = [];

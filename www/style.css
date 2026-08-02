@@ -301,9 +301,9 @@ button { font-family: inherit; }
 .cell.clue {
   background: var(--sw-purple);
   border-radius: 7px;
-  font-size: calc(var(--cell-size, 56px) * 0.19);
+  font-size: calc(var(--cell-size, 56px) * 0.155);
   font-weight: 700;
-  line-height: 1.12;
+  line-height: 1.15;
   overflow: hidden;
   padding: 3px;
   text-align: center;
