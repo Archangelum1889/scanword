@@ -236,14 +236,37 @@ button { font-family: inherit; }
 
 .hint-btn {
   flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
   border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.hint-btn .hint-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--sw-purple);
   color: #fff;
   border-radius: 12px;
-  padding: 9px 16px;
-  font-size: 14px;
-  font-weight: 700;
+  width: 38px;
+  font-size: 16px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.hint-btn .hint-label {
+  display: flex;
+  align-items: center;
+  background: var(--sw-purple);
+  color: #fff;
+  border-radius: 12px;
+  padding: 9px 14px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  white-space: nowrap;
 }
 
 .hint-btn:disabled { opacity: 0.5; }
@@ -271,16 +294,16 @@ button { font-family: inherit; }
 .board {
   display: grid;
   background: var(--sw-bg);
-  gap: 3px;
+  gap: 2px;
   width: max-content;
 }
 
 .cell {
   position: relative;
-  width: var(--cell-size, 56px);
-  height: var(--cell-size, 56px);
+  width: var(--cell-size, 42px);
+  height: var(--cell-size, 42px);
   background: var(--sw-cream);
-  border-radius: 7px;
+  border-radius: 5px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -289,7 +312,7 @@ button { font-family: inherit; }
 .cell.blocked { background: transparent; }
 
 .cell.letter {
-  font-size: calc(var(--cell-size, 56px) * 0.46);
+  font-size: calc(var(--cell-size, 42px) * 0.48);
   font-weight: 700;
   color: var(--sw-ink);
 }
@@ -300,12 +323,12 @@ button { font-family: inherit; }
 
 .cell.clue {
   background: var(--sw-purple);
-  border-radius: 7px;
-  font-size: calc(var(--cell-size, 56px) * 0.155);
+  border-radius: 5px;
+  font-size: calc(var(--cell-size, 42px) * 0.175);
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.1;
   overflow: hidden;
-  padding: 3px;
+  padding: 2px;
   text-align: center;
   color: var(--sw-purple-text);
 }
@@ -325,10 +348,16 @@ button { font-family: inherit; }
 .cell.clue .slot.solved { color: rgba(255,255,255,0.55); }
 
 .cell.clue .arrow {
-  font-size: calc(var(--cell-size, 56px) * 0.28);
-  font-weight: 700;
+  display: inline-flex;
+  vertical-align: middle;
   color: var(--sw-arrow);
   margin: 0 1px;
+}
+
+.cell.clue .arrow-svg {
+  width: calc(var(--cell-size, 42px) * 0.32);
+  height: calc(var(--cell-size, 42px) * 0.32);
+  display: block;
 }
 
 .cell.clue .slot.solved .arrow { color: rgba(255,255,255,0.4); }

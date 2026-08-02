@@ -34,7 +34,14 @@ let libraryFilter = "all";
 let libraryPage = 0;
 let game = null; // { puzzle, selectedWordId, cursor:[r,c] }
 
-const ARROW_GLYPH = { right: "→", left: "←", down: "↓", up: "↑" };
+// Изогнутая стрелка-«крючок» (как в референсе) — одна SVG-форма, для каждого
+// направления просто поворачивается: база рисуется указывающей вверх.
+const ARROW_ROTATION = { up: 0, right: 90, down: 180, left: 270 };
+const ARROW_SVG =
+  '<svg viewBox="0 0 24 24" class="arrow-svg" style="transform:rotate(ROTdeg)">' +
+  '<path d="M9,21 C9,14 4,13 9,6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>' +
+  '<path d="M5,10 L13,10 L9,3 Z" fill="currentColor"/>' +
+  '</svg>';
 const boardEl = document.getElementById("board");
 
 // ---------- Экраны ----------
@@ -290,7 +297,7 @@ function applyCellSize() {
 }
 
 function fitCellSize() {
-  currentCellSize = window.innerWidth < 380 ? 50 : 56;
+  currentCellSize = window.innerWidth < 380 ? 38 : 42;
   applyCellSize();
 }
 
@@ -361,7 +368,8 @@ function makeClueSlot(info, axis) {
   const slot = document.createElement("div");
   slot.className = "slot";
   slot.dataset.wordId = info.wordId;
-  const arrowSpan = '<span class="arrow">' + ARROW_GLYPH[info.arrow] + '</span>';
+  const arrowIcon = ARROW_SVG.replace("ROT", ARROW_ROTATION[info.arrow]);
+  const arrowSpan = '<span class="arrow">' + arrowIcon + '</span>';
   const leading = info.arrow === "left" || info.arrow === "up";
   slot.innerHTML = leading ? (arrowSpan + info.text) : (info.text + arrowSpan);
   slot.addEventListener("click", () => selectWord(info.wordId));
