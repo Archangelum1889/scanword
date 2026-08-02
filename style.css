@@ -199,37 +199,64 @@ button { font-family: inherit; }
 .setting-row input { flex: 0 0 auto; width: 20px; height: 20px; }
 .setting-group-title { font-size: 12px; font-weight: 700; color: #8a8d95; text-transform: uppercase; margin-top: 12px; }
 
-/* Игра — верхняя панель */
+/* Игра — палитра под эталон */
+#screen-game {
+  --sw-bg: #c7b6a2;
+  --sw-cream: #f4eee2;
+  --sw-purple: #9c5c8c;
+  --sw-purple-dark: #452041;
+  --sw-purple-text: #ffffff;
+  --sw-gold: #edc751;
+  --sw-ink: #352a3a;
+  --sw-arrow: #2c2430;
+  --sw-correct: #3f7d43;
+  background: var(--sw-bg);
+}
+
+/* Игра — верхняя панель: плавающие «таблетки» на фоне доски */
 .topbar {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e6ea;
+  background: transparent;
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
-.hint-btn {
-  flex: 0 0 auto;
-  border: 1px solid #e0e1e6;
-  background: #f7f8fa;
-  border-radius: 10px;
-  padding: 7px 12px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #2b2d33;
+.topbar .back-btn {
+  background: var(--sw-purple);
+  border: none;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
-.hint-btn:disabled { opacity: 0.4; }
+.topbar .back-btn:active { background: var(--sw-purple-dark); }
+
+.hint-btn {
+  flex: 0 0 auto;
+  border: none;
+  background: var(--sw-purple);
+  color: #fff;
+  border-radius: 12px;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.hint-btn:disabled { opacity: 0.5; }
 
 .puzzle-progress {
   margin-left: auto;
   font-size: 13px;
   font-weight: 700;
-  color: #45474d;
+  color: #fff;
+  background: var(--sw-purple);
+  padding: 10px 14px;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
 }
 
 /* Сетка */
@@ -238,46 +265,49 @@ button { font-family: inherit; }
   overflow: auto;
   padding: 12px;
   -webkit-overflow-scrolling: touch;
+  background: var(--sw-bg);
 }
 
 .board {
   display: grid;
-  border: 1px solid #2b2d33;
-  background: #2b2d33;
-  gap: 1px;
+  background: var(--sw-bg);
+  gap: 3px;
   width: max-content;
 }
 
 .cell {
   position: relative;
-  width: var(--cell-size, 26px);
-  height: var(--cell-size, 26px);
-  background: #ffffff;
+  width: var(--cell-size, 56px);
+  height: var(--cell-size, 56px);
+  background: var(--sw-cream);
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.cell.blocked { background: #2b2d33; }
+.cell.blocked { background: transparent; }
 
 .cell.letter {
-  font-size: calc(var(--cell-size, 26px) * 0.52);
-  font-weight: 600;
-  color: #1c1e21;
+  font-size: calc(var(--cell-size, 56px) * 0.46);
+  font-weight: 700;
+  color: var(--sw-ink);
 }
 
-.cell.letter.in-word { background: #f5f8ff; }
-.cell.letter.selected { background: #dbe6ff; }
-.cell.letter.correct { color: #1a7f37; }
+.cell.letter.in-word { background: var(--sw-gold); }
+.cell.letter.selected { background: var(--sw-gold); box-shadow: inset 0 0 0 2px var(--sw-purple-dark); }
+.cell.letter.correct { color: var(--sw-correct); }
 
 .cell.clue {
-  background: #eef0f4;
-  font-size: calc(var(--cell-size, 26px) * 0.19);
-  line-height: 1.05;
+  background: var(--sw-purple);
+  border-radius: 7px;
+  font-size: calc(var(--cell-size, 56px) * 0.19);
+  font-weight: 700;
+  line-height: 1.12;
   overflow: hidden;
-  padding: 2px;
+  padding: 3px;
   text-align: center;
-  color: #2b2d33;
+  color: var(--sw-purple-text);
 }
 
 .cell.clue.split { display: grid; grid-template-columns: 1fr 1fr; }
@@ -290,16 +320,18 @@ button { font-family: inherit; }
   word-break: break-word;
 }
 
-.cell.clue .slot.solved { color: #b7bac2; }
+.cell.clue .slot.active { background: var(--sw-purple-dark); border-radius: 5px; }
+
+.cell.clue .slot.solved { color: rgba(255,255,255,0.55); }
 
 .cell.clue .arrow {
-  font-size: calc(var(--cell-size, 26px) * 0.3);
+  font-size: calc(var(--cell-size, 56px) * 0.28);
   font-weight: 700;
-  color: #5470c4;
+  color: var(--sw-arrow);
   margin: 0 1px;
 }
 
-.cell.clue .slot.solved .arrow { color: #b7bac2; }
+.cell.clue .slot.solved .arrow { color: rgba(255,255,255,0.4); }
 
 /* Строка подсказки */
 .clue-bar {
@@ -315,8 +347,9 @@ button { font-family: inherit; }
   flex: 0 0 auto;
   width: 30px; height: 30px;
   border-radius: 8px;
-  border: 1px solid #e0e1e6;
-  background: #f7f8fa;
+  border: none;
+  background: var(--sw-purple);
+  color: #fff;
   font-size: 17px;
 }
 
@@ -324,7 +357,8 @@ button { font-family: inherit; }
   flex: 1;
   min-width: 0;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--sw-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -346,7 +380,7 @@ button { font-family: inherit; }
   flex-direction: column;
   gap: 6px;
   padding: 8px 4px calc(env(safe-area-inset-bottom, 0px) + 8px);
-  background: #eceef2;
+  background: var(--sw-bg, #eceef2);
 }
 
 .kb-row {
@@ -360,15 +394,15 @@ button { font-family: inherit; }
   max-width: 34px;
   height: 40px;
   border: none;
-  border-radius: 6px;
-  background: #ffffff;
+  border-radius: 8px;
+  background: var(--sw-purple, #ffffff);
   box-shadow: 0 1px 0 rgba(0,0,0,0.15);
   font-size: 15px;
-  font-weight: 600;
-  color: #1c1e21;
+  font-weight: 700;
+  color: #fff;
 }
 
-.key:active { background: #dbe6ff; }
+.key:active { background: var(--sw-purple-dark, #dbe6ff); }
 
 .key.wide { flex: 1.6; max-width: 56px; font-size: 18px; }
 

@@ -282,7 +282,7 @@ function stepWord(delta) {
 }
 
 // ---------- Рендер сетки ----------
-const CELL_MIN = 16, CELL_MAX = 70;
+const CELL_MIN = 20, CELL_MAX = 100;
 let currentCellSize = 30;
 
 function applyCellSize() {
@@ -290,7 +290,7 @@ function applyCellSize() {
 }
 
 function fitCellSize() {
-  currentCellSize = window.innerWidth < 380 ? 26 : 30;
+  currentCellSize = window.innerWidth < 380 ? 50 : 56;
   applyCellSize();
 }
 
@@ -378,6 +378,7 @@ function onCellClick(r, c) {
 
 function renderSelection() {
   boardEl.querySelectorAll(".cell.letter").forEach((el) => el.classList.remove("in-word", "selected"));
+  boardEl.querySelectorAll(".cell.clue .slot.active").forEach((el) => el.classList.remove("active"));
   const w = currentWord();
   if (!w) return;
   for (const [r, c] of wordCells(w)) {
@@ -388,6 +389,8 @@ function renderSelection() {
     const el = boardEl.querySelector('.cell[data-r="' + game.cursor[0] + '"][data-c="' + game.cursor[1] + '"]');
     if (el) el.classList.add("selected");
   }
+  const slotEl = boardEl.querySelector('.slot[data-word-id="' + w.id + '"]');
+  if (slotEl) slotEl.classList.add("active");
 }
 
 function renderCellContent(r, c) {
