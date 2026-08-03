@@ -379,17 +379,17 @@ button { font-family: inherit; }
 }
 
 .cell.clue .arrow-svg {
-  width: calc(var(--cell-size, 42px) * 0.28);
-  height: calc(var(--cell-size, 42px) * 0.28);
+  width: calc(var(--cell-size, 42px) * 0.20);
+  height: calc(var(--cell-size, 42px) * 0.20);
   display: block;
 }
 
-/* Сдвиг = половина размера стрелки (0.28×клетка → 0.14): центр стрелки садится
-   на границу, голова заходит в клетку-ответ */
-.cell.clue .arrow-down  { left: 50%; bottom: calc(var(--cell-size, 42px) * -0.14); transform: translateX(-50%); }
-.cell.clue .arrow-up    { left: 50%; top:    calc(var(--cell-size, 42px) * -0.14); transform: translateX(-50%); }
-.cell.clue .arrow-right { top: 50%;  right:  calc(var(--cell-size, 42px) * -0.14); transform: translateY(-50%); }
-.cell.clue .arrow-left  { top: 50%;  left:   calc(var(--cell-size, 42px) * -0.14); transform: translateY(-50%); }
+/* Стрелка маленькая и ВЫХОДИТ ОТ СТЕНКИ наружу (не из середины клетки): сдвиг
+   почти на весь её размер, так основание у грани, голова — в клетке-ответе */
+.cell.clue .arrow-down  { left: 50%; bottom: calc(var(--cell-size, 42px) * -0.18); transform: translateX(-50%); }
+.cell.clue .arrow-up    { left: 50%; top:    calc(var(--cell-size, 42px) * -0.18); transform: translateX(-50%); }
+.cell.clue .arrow-right { top: 50%;  right:  calc(var(--cell-size, 42px) * -0.18); transform: translateY(-50%); }
+.cell.clue .arrow-left  { top: 50%;  left:   calc(var(--cell-size, 42px) * -0.18); transform: translateY(-50%); }
 
 /* Стрелка теперь заходит на СВЕТЛУЮ клетку-ответ — решённую гасим в тёмный,
    а не в белый (иначе исчезает на кремовом фоне) */
