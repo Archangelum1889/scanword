@@ -289,12 +289,15 @@ button { font-family: inherit; }
   padding: 12px;
   -webkit-overflow-scrolling: touch;
   background: var(--sw-bg);
+  cursor: grab;
 }
+
+.board-wrap.panning { cursor: grabbing; }
 
 .board {
   display: grid;
   background: var(--sw-bg);
-  gap: 2px;
+  gap: 1px;
   width: max-content;
 }
 
@@ -303,7 +306,7 @@ button { font-family: inherit; }
   width: var(--cell-size, 42px);
   height: var(--cell-size, 42px);
   background: var(--sw-cream);
-  border-radius: 5px;
+  border-radius: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -323,44 +326,101 @@ button { font-family: inherit; }
 
 .cell.clue {
   background: var(--sw-purple);
-  border-radius: 5px;
-  font-size: calc(var(--cell-size, 42px) * 0.175);
+  border-radius: 2px;
   font-weight: 700;
-  line-height: 1.1;
-  overflow: hidden;
-  padding: 2px;
-  text-align: center;
   color: var(--sw-purple-text);
+  /* overflow видимый — чтобы стрелка могла зайти в клетку-ответ; z-index —
+     чтобы она рисовалась ПОВЕРХ соседней клетки, а не под ней */
+  overflow: visible;
+  z-index: 2;
 }
 
-.cell.clue.split { display: grid; grid-template-columns: 1fr 1fr; }
+.cell.clue.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; }
 
 .cell.clue .slot {
+  width: 100%;
+  height: 100%;
+  /* min-width/height:0 — иначе в сдвоенных клетках (grid 1fr/1fr) слот как
+     grid-элемент раздувается до min-content самого длинного слова и вылезает */
+  min-width: 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1px;
-  word-break: break-word;
 }
 
-.cell.clue .slot.active { background: var(--sw-purple-dark); border-radius: 5px; }
+.cell.clue .slot.active { background: var(--sw-purple-dark); border-radius: 2px; }
 
-.cell.clue .slot.solved { color: rgba(255,255,255,0.55); }
+/* Текст подсказки: перенос ТОЛЬКО по словам, кегль подгоняется в JS (fitClueFonts) */
+.cell.clue .ctext {
+  display: block;
+  width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+  padding: 2px 3px;
+  text-align: center;
+  line-height: 1.05;
+  font-weight: 700;
+  word-break: normal;
+  overflow-wrap: normal;
+  hyphens: none;
+  overflow: hidden;
+}
 
+.cell.clue .slot.solved .ctext { color: rgba(255,255,255,0.55); }
+
+/* Стрелка позиционируется относительно КЛЕТКИ (slot не position:relative),
+   наполовину заходит в клетку-ответ — «выходит из квадратика», как в рефе */
 .cell.clue .arrow {
-  display: inline-flex;
-  vertical-align: middle;
+  position: absolute;
   color: var(--sw-arrow);
-  margin: 0 1px;
+  line-height: 0;
+  pointer-events: none;
 }
 
 .cell.clue .arrow-svg {
-  width: calc(var(--cell-size, 42px) * 0.32);
-  height: calc(var(--cell-size, 42px) * 0.32);
+  width: calc(var(--cell-size, 42px) * 0.28);
+  height: calc(var(--cell-size, 42px) * 0.28);
   display: block;
 }
 
-.cell.clue .slot.solved .arrow { color: rgba(255,255,255,0.4); }
+/* Сдвиг = половина размера стрелки (0.28×клетка → 0.14): центр стрелки садится
+   на границу, голова заходит в клетку-ответ */
+.cell.clue .arrow-down  { left: 50%; bottom: calc(var(--cell-size, 42px) * -0.14); transform: translateX(-50%); }
+.cell.clue .arrow-up    { left: 50%; top:    calc(var(--cell-size, 42px) * -0.14); transform: translateX(-50%); }
+.cell.clue .arrow-right { top: 50%;  right:  calc(var(--cell-size, 42px) * -0.14); transform: translateY(-50%); }
+.cell.clue .arrow-left  { top: 50%;  left:   calc(var(--cell-size, 42px) * -0.14); transform: translateY(-50%); }
+
+/* Стрелка теперь заходит на СВЕТЛУЮ клетку-ответ — решённую гасим в тёмный,
+   а не в белый (иначе исчезает на кремовом фоне) */
+.cell.clue .slot.solved .arrow { color: rgba(44,36,48,0.4); }
+
+/* Панель инструментов над строкой подсказки: зум +/− */
+.board-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 6px 12px 0;
+  background: var(--sw-bg);
+}
+
+.zoom-btn {
+  width: 42px;
+  height: 32px;
+  border: none;
+  border-radius: 10px;
+  background: var(--sw-purple);
+  color: #fff;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.zoom-btn:active { background: var(--sw-purple-dark); }
 
 /* Строка подсказки */
 .clue-bar {
