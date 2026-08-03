@@ -4,6 +4,23 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Сканворды</title>
+<script>
+// Диагностика для мобилы (нет консоли): показываем ошибку на экране вместо белого
+window.addEventListener("error", function (e) {
+  try {
+    var d = document.getElementById("errbox");
+    if (!d) {
+      d = document.createElement("pre");
+      d.id = "errbox";
+      d.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#fee;color:#900;font:12px/1.4 monospace;padding:10px;white-space:pre-wrap;margin:0;max-height:60%;overflow:auto";
+      (document.body || document.documentElement).appendChild(d);
+    }
+    d.textContent += (e.message || (e.error && e.error.message) || "error") +
+      " @ " + String(e.filename || "").split("/").pop() + ":" + (e.lineno || "") + "\n";
+  } catch (_) {}
+});
+</script>
+<script async src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -102,6 +119,11 @@
   <main class="board-wrap" id="boardWrap">
     <div id="board" class="board"></div>
   </main>
+
+  <div class="board-tools">
+    <button id="zoomOutBtn" class="zoom-btn" aria-label="Отдалить">−</button>
+    <button id="zoomInBtn" class="zoom-btn" aria-label="Приблизить">+</button>
+  </div>
 
   <div class="clue-bar" id="clueBar">
     <button id="cluePrevBtn" class="clue-nav">‹</button>

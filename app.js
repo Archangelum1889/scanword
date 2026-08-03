@@ -34,13 +34,15 @@ let libraryFilter = "all";
 let libraryPage = 0;
 let game = null; // { puzzle, selectedWordId, cursor:[r,c] }
 
-// Изогнутая стрелка-«крючок» (как в референсе) — одна SVG-форма, для каждого
-// направления просто поворачивается: база рисуется указывающей вверх.
+// Стрелка-указатель — одна SVG-форма, для каждого направления просто
+// поворачивается: база рисуется указывающей вверх.
 const ARROW_ROTATION = { up: 0, right: 90, down: 180, left: 270 };
+// Чистая прямая стрелка (база смотрит вверх, поворачивается по направлению ответа):
+// короткий стержень + жирная треугольная голова, хорошо читается на мелком размере.
 const ARROW_SVG =
   '<svg viewBox="0 0 24 24" class="arrow-svg" style="transform:rotate(ROTdeg)">' +
-  '<path d="M9,21 C9,14 4,13 9,6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>' +
-  '<path d="M5,10 L13,10 L9,3 Z" fill="currentColor"/>' +
+  '<path d="M12,22 L12,11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>' +
+  '<path d="M12,3 L5,13 L19,13 Z" fill="currentColor"/>' +
   '</svg>';
 const boardEl = document.getElementById("board");
 
@@ -184,12 +186,14 @@ function openPuzzle(id) {
   if (!progress[id]) progress[id] = { filled: {}, completed: false };
 
   game = { puzzle, selectedWordId: null, cursor: null };
+  // Экран показываем ДО renderBoard: скрытый (display:none) экран даёт нулевые
+  // замеры, из-за чего авто-подгонка кегля (fitClueFonts) уходит в максимум.
+  showScreen("screen-game");
+  document.getElementById("keyboard").classList.remove("hidden");
   fitCellSize();
   renderBoard();
   updateHintButton();
   updateProgressLabel();
-  showScreen("screen-game");
-  document.getElementById("keyboard").classList.remove("hidden");
 
   const firstUnsolved = puzzle.words.find((w) => !isWordSolved(w));
   selectWord(firstUnsolved ? firstUnsolved.id : puzzle.words[0].id);
@@ -296,6 +300,17 @@ function applyCellSize() {
   document.documentElement.style.setProperty("--cell-size", currentCellSize + "px");
 }
 
+// Единая точка изменения масштаба: клампим в пределы и пересчитываем кегль
+function setCellSize(px) {
+  currentCellSize = Math.max(CELL_MIN, Math.min(CELL_MAX, Math.round(px)));
+  applyCellSize();
+  if (game) fitClueFonts();
+}
+function zoomBy(step) { setCellSize(currentCellSize + step); }
+
+document.getElementById("zoomInBtn").addEventListener("click", function () { zoomBy(6); });
+document.getElementById("zoomOutBtn").addEventListener("click", function () { zoomBy(-6); });
+
 function fitCellSize() {
   currentCellSize = window.innerWidth < 380 ? 38 : 42;
   applyCellSize();
@@ -330,8 +345,38 @@ function wirePinchZoom() {
   }, { passive: false });
 
   wrap.addEventListener("touchend", (e) => {
-    if (e.touches.length < 2) pinchStartDist = null;
+    if (e.touches.length < 2) { pinchStartDist = null; if (game) fitClueFonts(); }
   }, { passive: true });
+
+  // Десктоп: Ctrl/⌘ + колесо = зум поля (без модификатора — обычная прокрутка)
+  wrap.addEventListener("wheel", (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 4 : -4);
+    }
+  }, { passive: false });
+
+  // Десктоп: перетаскивание поля мышью (grab-to-pan). Только для настоящей мыши
+  // (pointerType==='mouse') — тач панорамирует нативно, без конфликтов.
+  // Клик без сдвига (< порога) остаётся кликом по клетке — различаем по panMoved.
+  let panning = false, panMoved = false, panX = 0, panY = 0, panL = 0, panT = 0;
+  wrap.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    panning = true; panMoved = false;
+    panX = e.clientX; panY = e.clientY;
+    panL = wrap.scrollLeft; panT = wrap.scrollTop;
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!panning) return;
+    const dx = e.clientX - panX, dy = e.clientY - panY;
+    if (!panMoved && Math.hypot(dx, dy) > 5) { panMoved = true; wrap.classList.add("panning"); }
+    if (panMoved) { wrap.scrollLeft = panL - dx; wrap.scrollTop = panT - dy; }
+  });
+  window.addEventListener("pointerup", () => { panning = false; wrap.classList.remove("panning"); });
+  // после реального перетаскивания гасим клик, чтобы не выбралось слово
+  wrap.addEventListener("click", (e) => {
+    if (panMoved) { e.stopPropagation(); e.preventDefault(); panMoved = false; }
+  }, true);
 }
 
 function renderBoard() {
@@ -362,16 +407,43 @@ function renderBoard() {
   }
   renderSelection();
   updateClueSolvedStyles();
+  fitClueFonts();
+}
+
+// Кегль подсказки подгоняется под клетку: короткие — крупно, длинные — мельче.
+// Перенос идёт по словам (см. .ctext в CSS), здесь ищем самый большой размер,
+// при котором текст ещё влезает и по ширине, и по высоте (бинарный поиск).
+function fitClueFonts() {
+  const cell = currentCellSize;
+  const maxF = cell * 0.30;
+  const minF = Math.max(5, cell * 0.13);
+  boardEl.querySelectorAll(".cell.clue .slot").forEach((slot) => {
+    const t = slot.querySelector(".ctext");
+    if (!t || !slot.clientHeight) return;
+    let lo = minF, hi = maxF, best = minF;
+    for (let i = 0; i < 8; i++) {
+      const mid = (lo + hi) / 2;
+      t.style.fontSize = mid.toFixed(2) + "px";
+      const fits = t.scrollWidth <= t.clientWidth + 0.5 &&
+                   t.scrollHeight <= slot.clientHeight + 0.5;
+      if (fits) { best = mid; lo = mid; } else { hi = mid; }
+    }
+    t.style.fontSize = best.toFixed(2) + "px";
+  });
 }
 
 function makeClueSlot(info, axis) {
   const slot = document.createElement("div");
   slot.className = "slot";
   slot.dataset.wordId = info.wordId;
-  const arrowIcon = ARROW_SVG.replace("ROT", ARROW_ROTATION[info.arrow]);
-  const arrowSpan = '<span class="arrow">' + arrowIcon + '</span>';
-  const leading = info.arrow === "left" || info.arrow === "up";
-  slot.innerHTML = leading ? (arrowSpan + info.text) : (info.text + arrowSpan);
+  const textEl = document.createElement("span");
+  textEl.className = "ctext";
+  textEl.textContent = info.text;
+  const arrowEl = document.createElement("span");
+  arrowEl.className = "arrow arrow-" + info.arrow;
+  arrowEl.innerHTML = ARROW_SVG.replace("ROT", ARROW_ROTATION[info.arrow]);
+  slot.appendChild(textEl);
+  slot.appendChild(arrowEl);
   slot.addEventListener("click", () => selectWord(info.wordId));
   return slot;
 }
@@ -569,10 +641,29 @@ document.getElementById("winLibraryBtn").addEventListener("click", () => {
   showScreen("screen-library");
 });
 
-window.addEventListener("resize", () => { if (game) fitCellSize(); });
+window.addEventListener("resize", () => { if (game) { fitCellSize(); fitClueFonts(); } });
 
 // ---------- Инициализация ----------
+// Telegram Mini App: развернуть на весь экран и не закрывать свайпом вниз
+// (иначе прокрутка/пан поля будет случайно сворачивать приложение).
+function initTelegram() {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (!tg) {
+    // SDK грузится async — подождём его, но игру этим НЕ блокируем
+    initTelegram._n = (initTelegram._n || 0) + 1;
+    if (initTelegram._n <= 50) setTimeout(initTelegram, 100);   // до ~5с
+    return;
+  }
+  try {
+    tg.ready();
+    tg.expand();
+    if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
+    if (tg.setHeaderColor) tg.setHeaderColor("#c7b6a2");   // под фон доски
+  } catch (e) {}
+}
+
 async function init() {
+  initTelegram();
   renderKeyboard();
   wirePinchZoom();
   try {
