@@ -2856,8 +2856,9 @@ function generatePuzzleTightDense(bank, opts) {
     var len = word.length;
     var cbR = dir === "H" ? r : r - 1, cbC = dir === "H" ? c - 1 : c;
     if (at(cbR, cbC)) return null;                    // клетка-подсказка не может быть буквой
-    var cbSlot = clueMap.get(key(cbR, cbC));
-    if (cbSlot && cbSlot[dir]) return null;            // этот clue-слот в ЭТОМ направлении занят
+    if (clueMap.has(key(cbR, cbC))) return null;       // клетка-подсказка уже занята ЛЮБЫМ вопросом:
+                                                        // двойные (H+V в одной клетке) ЗАПРЕЩЕНЫ — на мобиле каша
+    var newClueKeys = new Set([key(cbR, cbC)]);        // клетки-подсказки этой укладки — все РАЗНЫЕ
     var aR = dir === "H" ? r : r + len, aC = dir === "H" ? c + len : c;
     if (at(aR, aC)) return null;                        // клетка сразу после конца — не буква
 
@@ -2891,8 +2892,9 @@ function generatePuzzleTightDense(bank, opts) {
         var sClueR = perpDir === "V" ? run.r - 1 : run.r;
         var sClueC = perpDir === "V" ? run.c : run.c - 1;
         if (at(sClueR, sClueC)) return null;              // клетка-подсказка побочного слова — буква
-        var sSlot = clueMap.get(key(sClueR, sClueC));
-        if (sSlot && sSlot[perpDir]) return null;          // конфликт clue-слота
+        var sckk = key(sClueR, sClueC);
+        if (clueMap.has(sckk) || newClueKeys.has(sckk)) return null; // клетка уже под вопросом — двойные ЗАПРЕЩЕНЫ
+        newClueKeys.add(sckk);
         var sEntry = wordMap.get(run.text);
         if (!sEntry) return null;
         seenWords.add(run.text);

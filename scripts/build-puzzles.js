@@ -10,10 +10,11 @@ const path = require("path");
 const { WORD_BANK, generatePuzzleTightBest, fullScanAssert } = require("../www/generator.js");
 
 const MAX_PUZZLES = 40;      // потолок; реально упрёмся в размер банка
-const MAX_DIM = 18;          // тесный укладчик держит ~18×18
+const MAX_DIM = 12;          // маленькая сетка → те же ~47 слов пакуются ВПЛОТНУЮ (25% пусто, не 42%)
 const ATTEMPTS = 8;          // тесный медленный (~3–4с/партия) — меньше попыток best-of
-const GEN_MIN_WORDS = 40;    // тесный даёт 65–90 слов — легко проходит
-const MAX_BLANK = 0.34;      // тесный ~26–30%; отсекаем хвост
+const GEN_MIN_WORDS = 34;    // «нормально» ~45 слов (юзер: 100 — перебор, вернул как было)
+const WORD_CAP = 50;         // ПОТОЛОК слов на партию — не раздувать
+const MAX_BLANK = 0.32;      // тесный при maxDim12 ~25%; отсекаем хвост
 const POOL_STOP = 45;
 
 const remaining = WORD_BANK.slice();
@@ -21,7 +22,7 @@ const puzzles = [];
 let fails = 0;   // подряд неудачных генераций (плохое качество)
 
 while (puzzles.length < MAX_PUZZLES && remaining.length >= POOL_STOP && fails < 12) {
-  const puzzle = generatePuzzleTightBest(remaining, ATTEMPTS, { maxDim: MAX_DIM, minWords: GEN_MIN_WORDS });
+  const puzzle = generatePuzzleTightBest(remaining, ATTEMPTS, { maxDim: MAX_DIM, minWords: GEN_MIN_WORDS, wordCap: WORD_CAP });
   let bl = 0, cells = puzzle ? puzzle.rows * puzzle.cols : 1;
   if (puzzle) for (const row of puzzle.grid) for (const c of row) if (c.type === "blocked") bl++;
   // мелкий/разреженный вариант или «слово-призрак» — неудача: повторяем,
