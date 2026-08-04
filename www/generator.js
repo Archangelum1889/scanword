@@ -1594,7 +1594,605 @@ function generatePuzzleDenseBest(bank, n, opts) {
   return best || generatePuzzleDense(bank, opts);
 }
 
-var ScanwordGen = { WORD_BANK: WORD_BANK, ScanwordGenerator: ScanwordGenerator, generatePuzzle: generatePuzzle, generatePuzzleDense: generatePuzzleDense, generatePuzzleDenseBest: generatePuzzleDenseBest };
+// ===================================================================
+// «Шведский» плотный движок v2 (см. спеку densegen): рост ГЕОМЕТРИИ
+// слотов (длина+направление+позиция, без слов) с жёстким капом
+// пересечений по длине → CSP-заливка словами банка (backtracking +
+// MRV + forward checking + LCV) → локальный ремонт незакрытых слотов
+// → best-of-N с обязательным ghost-word assert. Старые
+// generatePuzzleDense/generatePuzzleDenseBest не трогаются — это
+// отдельный движок с тем же JSON-форматом {rows,cols,grid,words,wordCount}.
+
+// Потолок пересечений на слот этой длины и предпочтительные позиции
+// точки пересечения — стартовая точка чисел из densegen_spec.md
+// (эффAlpha-замер на WORD_BANK), но 4-8 ОСОЗНАННО ослаблены относительно
+// спеки после самозамера (см. отчёт агента): при буквальном
+// {4:2,5:2,6:2,7:2,8:1} движок держал ~40-43% пусто — НЕ лучше честно
+// перезамеренного старого generatePuzzleDense (38.2% при тех же
+// параметрах теста), т.е. цель спеки (8-18%) была недостижима. Диагностика
+// показала: (1) CSP+repair НИКОГДА не теряют слот из-за нехватки слов
+// даже при cap=99 (нулевые repair-потери на полном банке) — то есть
+// буквальный cap 1-2 для 4-8 в разы жёстче, чем реально требуется
+// лексически; (2) при cap=99 пусто падает до ~31% — то есть САМА
+// геометрия (не cap) даёт дальнейший пол ниже которого не спуститься
+// без ослабления анти-«ров»-правила смежности. 3 и 9-11 оставлены
+// БЕЗ ИЗМЕНЕНИЙ — для них эффAlpha спеки показывал реальный дефицит
+// (макс. группа 2-9 слов), самое обоснованное место в спеке.
+var SW_CAP = { 3: 1, 4: 3, 5: 4, 6: 4, 7: 3, 8: 2, 9: 1, 10: 1, 11: 1 };
+var SW_PREF_POS = { 3: [1], 4: [1, 3], 5: [1, 4], 6: [1, 5], 7: [1, 6], 8: [1], 9: [1, 7], 10: [9], 11: [5, 9] };
+
+// Взвешенный выбор длины слота: учитывает реальный остаток предложения
+// (hist[L]-planned[L]) — никогда не выберет длину, для которой банк уже
+// исчерпан планируемыми слотами, и слегка смещён к пику распределения
+// банка (4-6 букв). allowLong=false исключает 9-11 (лимит «хребтов»).
+function swWeightedPick(hist, planned, allowLong) {
+  var lens = [], weights = [];
+  for (var L = 3; L <= 11; L++) {
+    if (!hist[L]) continue;
+    if (!allowLong && L >= 9) continue;
+    var room = hist[L] - (planned[L] || 0);
+    if (room <= 0) continue;
+    var w = hist[L];
+    // «Эффективность» длины = CAP[L]/L — доля клеток слова, которая МОЖЕТ
+    // быть перекрёстком (снимает буферную клетку с соседа). Длины с плохим
+    // соотношением (7-8, и длинные 9-11 сверх лимита «хребтов») почти не
+    // помогают плотности — они лишь занимают место, требуя буфер вокруг
+    // всей своей некроссящейся части. Смещаем спрос к 4-5, где это
+    // соотношение лучше всего (0.5 и 0.4).
+    w *= (SW_CAP[L] || 1) / L * 6;
+    lens.push(L); weights.push(w);
+  }
+  if (!lens.length) return 0;
+  var total = 0; for (var i = 0; i < weights.length; i++) total += weights[i];
+  var r = Math.random() * total;
+  for (var j = 0; j < lens.length; j++) { r -= weights[j]; if (r <= 0) return lens[j]; }
+  return lens[lens.length - 1];
+}
+
+// ФАЗА 1+2 — рост геометрии слотов (без слов, только длина+направление+
+// позиция) и граф пересечений. Никогда не создаёт клетку "blocked" — сама
+// функция производит только letter-плейсхолдеры и clue-клетки; итоговые
+// "blocked" появляются позже, при рендере, как естественные пробелы между
+// органической формой скелета и его прямоугольным bbox (см. buildOutput).
+function swBuildSkeleton(pool, opts) {
+  var maxDim = opts.maxDim || 18;
+  var wordCap = opts.wordCap || 55;
+  var K = function (r, c) { return r + "," + c; };
+  var cellSlot = new Map();     // "r,c" -> {h:slotId|0, v:slotId|0}
+  var clueH = new Set(), clueV = new Set();
+  var slots = [];
+  var slotsById = {};
+  var crossings = {};           // slotId -> [{other, myIndex, otherIndex}]
+  var minR = 0, maxR = 0, minC = 0, maxC = 0;
+  var nextId = 1;
+
+  var hist = {};
+  for (var Li = 3; Li <= 11; Li++) hist[Li] = 0;
+  pool.forEach(function (e) { var l = e.w.length; if (hist[l] !== undefined) hist[l]++; });
+  var planned = {};
+
+  var longCap = 2 + Math.floor(Math.random() * 3); // 2..4 длинных слова-«хребта» максимум
+  var longCount = 0;
+
+  function occupied(r, c) { var cs = cellSlot.get(K(r, c)); return !!(cs && (cs.h || cs.v)); }
+  function bboxIfAdded(r, c, dir, len) {
+    var cluR = dir === "H" ? r : r - 1, cluC = dir === "H" ? c - 1 : c;
+    var endR = dir === "H" ? r : r + len - 1, endC = dir === "H" ? c + len - 1 : c;
+    var rr0 = Math.min(minR, cluR, r, endR), rr1 = Math.max(maxR, cluR, r, endR);
+    var cc0 = Math.min(minC, cluC, c, endC), cc1 = Math.max(maxC, cluC, c, endC);
+    return { h: rr1 - rr0 + 1, w: cc1 - cc0 + 1 };
+  }
+
+  // Проверяет геометрию слота (без символов, только структуру) и
+  // собирает пересечения с уже существующими слотами. null — провал;
+  // иначе {crossings:[{r,c,i,other,otherIndex}]}. Кап пересечений по
+  // длине проверяется здесь же (для ЧУЖОГО слота, с которым пересекаемся) —
+  // это единственное место, где кап реально может быть нарушен, поэтому
+  // проверка тут делает CAP инвариантом независимо от пути роста
+  // (фронтир-пересечение или «полка» с бонусным пересечением).
+  function canPlaceGeom(r, c, dir, len) {
+    if (len < 3 || len > 11) return null;
+    var bb = bboxIfAdded(r, c, dir, len);
+    if (bb.h > maxDim || bb.w > maxDim) return null;
+    var bR = dir === "H" ? r : r - 1, bC = dir === "H" ? c - 1 : c;
+    var aR = dir === "H" ? r : r + len, aC = dir === "H" ? c + len : c;
+    if (occupied(bR, bC)) return null;               // клетка-подсказка не может быть буквой
+    if (occupied(aR, aC)) return null;                // сразу после слова — не буква (иначе слипание)
+    if (dir === "H" && clueH.has(K(bR, bC))) return null;  // эта же clue-клетка уже занята H-подсказкой
+    if (dir === "V" && clueV.has(K(bR, bC))) return null;  // ...или V-подсказкой
+    var found = [];
+    for (var i = 0; i < len; i++) {
+      var cr = dir === "H" ? r : r + i, cc = dir === "H" ? c + i : c;
+      var cs = cellSlot.get(K(cr, cc));
+      if (cs && (cs.h || cs.v)) {
+        if (dir === "H") {
+          if (cs.h) return null;                       // в клетке уже есть H-слово
+          var otherId = cs.v, other = slotsById[otherId];
+          var already = found.filter(function (f) { return f.other === otherId; }).length;
+          if (other.crossCount + already >= (SW_CAP[other.len] || 1)) return null; // кап чужого слота
+          found.push({ r: cr, c: cc, i: i, other: otherId, otherIndex: cr - other.r });
+        } else {
+          if (cs.v) return null;
+          var otherId2 = cs.h, other2 = slotsById[otherId2];
+          var already2 = found.filter(function (f) { return f.other === otherId2; }).length;
+          if (other2.crossCount + already2 >= (SW_CAP[other2.len] || 1)) return null;
+          found.push({ r: cr, c: cc, i: i, other: otherId2, otherIndex: cc - other2.c });
+        }
+      } else {
+        if (clueH.has(K(cr, cc)) || clueV.has(K(cr, cc))) return null; // клетка занята подсказкой
+        if (dir === "H") { if (occupied(cr - 1, cc) || occupied(cr + 1, cc)) return null; }
+        else { if (occupied(cr, cc - 1) || occupied(cr, cc + 1)) return null; }
+      }
+    }
+    return { crossings: found };
+  }
+
+  function commitSlot(r, c, dir, len, crossInfo) {
+    var id = nextId++;
+    var slot = { id: id, dir: dir, r: r, c: c, len: len, crossCount: crossInfo.length };
+    slots.push(slot); slotsById[id] = slot; crossings[id] = [];
+    for (var i = 0; i < len; i++) {
+      var cr = dir === "H" ? r : r + i, cc = dir === "H" ? c + i : c;
+      var k = K(cr, cc);
+      var cs = cellSlot.get(k);
+      if (!cs) { cs = { h: 0, v: 0 }; cellSlot.set(k, cs); }
+      if (dir === "H") cs.h = id; else cs.v = id;
+      if (cr < minR) minR = cr; if (cr > maxR) maxR = cr;
+      if (cc < minC) minC = cc; if (cc > maxC) maxC = cc;
+    }
+    var cbR = dir === "H" ? r : r - 1, cbC = dir === "H" ? c - 1 : c;
+    if (dir === "H") clueH.add(K(cbR, cbC)); else clueV.add(K(cbR, cbC));
+    if (cbR < minR) minR = cbR; if (cbR > maxR) maxR = cbR;
+    if (cbC < minC) minC = cbC; if (cbC > maxC) maxC = cbC;
+    if (len >= 9) longCount++;
+    planned[len] = (planned[len] || 0) + 1;
+    crossInfo.forEach(function (x) {
+      crossings[id].push({ other: x.other, myIndex: x.i, otherIndex: x.otherIndex });
+      crossings[x.other].push({ other: id, myIndex: x.otherIndex, otherIndex: x.i });
+      slotsById[x.other].crossCount++;
+    });
+    return slot;
+  }
+
+  function pickLenCandidates(count, allowLong) {
+    var out = [];
+    for (var i = 0; i < count; i++) {
+      var L = swWeightedPick(hist, planned, allowLong);
+      if (L) out.push(L);
+    }
+    return out;
+  }
+
+  // Точки роста: {r,c,ownerId,idx} — idx - позиция буквы внутри владельца.
+  var frontier = [];
+  function pushFrontier(slot) {
+    for (var i = 0; i < slot.len; i++) {
+      var cr = slot.dir === "H" ? slot.r : slot.r + i, cc = slot.dir === "H" ? slot.c + i : slot.c;
+      frontier.push({ r: cr, c: cc, ownerId: slot.id, idx: i });
+    }
+  }
+
+  // Взвешенно выбирает точку фронтира (PREF_POS владельца весит x4),
+  // пропуская владельцев с исчерпанным капом; удаляет выбранную точку.
+  function popWeightedFrontier() {
+    var candidates = [];
+    for (var i = 0; i < frontier.length; i++) {
+      var f = frontier[i], owner = slotsById[f.ownerId];
+      if (!owner || owner.crossCount >= (SW_CAP[owner.len] || 1)) continue;
+      var pref = SW_PREF_POS[owner.len] || [];
+      candidates.push({ pos: i, w: pref.indexOf(f.idx) >= 0 ? 4 : 1 });
+    }
+    if (!candidates.length) { frontier.length = 0; return null; }
+    var total = 0; for (var k = 0; k < candidates.length; k++) total += candidates[k].w;
+    var r = Math.random() * total, chosen = candidates[0];
+    for (var j = 0; j < candidates.length; j++) { r -= candidates[j].w; if (r <= 0) { chosen = candidates[j]; break; } }
+    var picked = frontier[chosen.pos];
+    frontier.splice(chosen.pos, 1);
+    return picked;
+  }
+
+  // Растим ПЕРПЕНДИКУЛЯРНЫЙ слот через точку фронтира — правило Энгеля
+  // (клетка принадлежит хотя бы одному слову) эксплуатируется явно тут:
+  // сама точка уже принадлежит owner, новый слот пересекает её ровно один раз.
+  function tryGrowCrossing(point) {
+    var owner = slotsById[point.ownerId];
+    if (!owner || owner.crossCount >= (SW_CAP[owner.len] || 1)) return false;
+    var dir2 = owner.dir === "H" ? "V" : "H";
+    var lens = pickLenCandidates(3, longCount < longCap);
+    for (var li = 0; li < lens.length; li++) {
+      var len2 = lens[li];
+      var pref = (SW_PREF_POS[len2] || []).slice();
+      var all = []; for (var p = 0; p < len2; p++) all.push(p);
+      var order = pref.concat(all).filter(function (v, ix, a) { return a.indexOf(v) === ix; });
+      for (var oi = 0; oi < order.length; oi++) {
+        var j = order[oi];
+        var r2 = dir2 === "V" ? point.r - j : point.r;
+        var c2 = dir2 === "H" ? point.c - j : point.c;
+        var res = canPlaceGeom(r2, c2, dir2, len2);
+        if (res && res.crossings.some(function (x) { return x.r === point.r && x.c === point.c; })) {
+          var slot = commitSlot(r2, c2, dir2, len2, res.crossings);
+          pushFrontier(slot);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Стоимость роста bbox, если добавить слот (r,c,dir,len): 0 — влезает
+  // целиком в уже занятый прямоугольник, >0 — сколько клеток добавится
+  // к периметру. Используется, чтобы предпочитать ВПИСЫВАНИЕ в уже
+  // застроенную область, а не бездумный прыжок в новую территорию.
+  function bboxGrowthCost(r, c, dir, len) {
+    var bb = bboxIfAdded(r, c, dir, len);
+    var curH = maxR - minR + 1, curW = maxC - minC + 1;
+    return Math.max(0, bb.h - curH) + Math.max(0, bb.w - curW);
+  }
+
+  // Плотное заполнение (объединяет «полку» вдоль той же строки/столбца
+  // и «кирпичную кладку» на соседней строке/столбце без буфера,
+  // предложение №4 из спеки, применённое к геометрии). В отличие от
+  // первой версии (случайная выборка якорей) — сканирует ВСЕ уже
+  // существующие слоты как якоря (как это делает старый жадный
+  // generatePuzzleDense, перебирающий все слова/позиции каждый шаг) и
+  // коммитит ГЛОБАЛЬНО лучший найденный вариант: сперва минимальный
+  // прирост bbox, при равенстве — максимум бонусных пересечений
+  // (случайных «зацепов» за чужие перпендикулярные слова по пути).
+  // Чисто случайная выборка (первая версия) была СУЩЕСТВЕННО менее
+  // плотной на практике — см. densegen_spec.md отчёт: было хуже baseline.
+  function tryDenseInfill() {
+    var best = null, bestCost = Infinity, bestCross = -1;
+    var lens = pickLenCandidates(2, longCount < longCap);
+    for (var si = 0; si < slots.length; si++) {
+      var src = slots[si];
+      for (var mode = 0; mode < 2; mode++) {
+        var sameDir = mode === 0;
+        var dir = sameDir ? src.dir : (src.dir === "H" ? "V" : "H");
+        for (var li = 0; li < lens.length; li++) {
+          var len2 = lens[li];
+          var candidates = [];
+          if (sameDir) {
+            for (var g = 1; g <= 2; g++) {
+              if (src.dir === "H") { candidates.push([src.r, src.c + src.len + g]); candidates.push([src.r, src.c - len2 - g]); }
+              else { candidates.push([src.r + src.len + g, src.c]); candidates.push([src.r - len2 - g, src.c]); }
+            }
+          } else {
+            for (var po = -1; po <= 1; po += 2) {
+              for (var g2 = 1; g2 <= 2; g2++) {
+                if (src.dir === "H") { candidates.push([src.r + po, src.c + src.len + g2]); candidates.push([src.r + po, src.c - len2 - g2]); }
+                else { candidates.push([src.r + src.len + g2, src.c + po]); candidates.push([src.r - len2 - g2, src.c + po]); }
+              }
+            }
+          }
+          for (var ci = 0; ci < candidates.length; ci++) {
+            var r2 = candidates[ci][0], c2 = candidates[ci][1];
+            var res = canPlaceGeom(r2, c2, dir, len2);
+            if (!res) continue;
+            var cost = bboxGrowthCost(r2, c2, dir, len2);
+            var cross = res.crossings.length;
+            if (cost < bestCost || (cost === bestCost && cross > bestCross)) {
+              bestCost = cost; bestCross = cross; best = { r: r2, c: c2, dir: dir, len: len2, res: res };
+            }
+          }
+        }
+      }
+      if (bestCost <= 0 && bestCross > 0) break; // отличный вариант уже найден — не тратим время дальше
+    }
+    if (!best) return false;
+    var slot = commitSlot(best.r, best.c, best.dir, best.len, best.res.crossings);
+    pushFrontier(slot);
+    return true;
+  }
+
+  if (!pool.length) return { slots: [], slotsById: {}, crossings: {} };
+
+  // засев: 1 длинное слово (7-11) как первый «хребет», если банк позволяет
+  var seedLens = pickLenCandidates(4, true).filter(function (l) { return l >= 7; });
+  var seedLen = seedLens.length ? seedLens[0] : (pickLenCandidates(1, true)[0] || 5);
+  var seed = commitSlot(0, 1, "H", seedLen, []);
+  pushFrontier(seed);
+
+  var guard = 0, guardMax = wordCap * 40, shelfFails = 0;
+  while (slots.length < wordCap && guard++ < guardMax) {
+    var grew = tryDenseInfill();
+    if (!grew && frontier.length) {
+      var point = popWeightedFrontier();
+      if (point) grew = tryGrowCrossing(point);
+    }
+    if (!grew) { shelfFails++; if (shelfFails > 100 && !frontier.length) break; }
+    else shelfFails = 0;
+  }
+  // Финальная развёртка-«зачистка»: анкорный поиск (tryDenseInfill) целится
+  // от СЛУЧАЙНОГО якоря и может систематически промахиваться мимо
+  // внутренних дыр, окружённых сразу неск. слотами. Явно сканируем КАЖДУЮ
+  // клетку уже занятого bbox на предмет слота, влезающего БЕЗ роста bbox
+  // (cost=0) — это не расширяет форму, только дозаполняет её изнутри.
+  var sweepRounds = 0;
+  var sweepChanged = true;
+  while (sweepChanged && slots.length < wordCap && sweepRounds++ < 8) {
+    sweepChanged = false;
+    for (var sr = minR; sr <= maxR; sr++) {
+      for (var sc = minC; sc <= maxC; sc++) {
+        if (slots.length >= wordCap) break;
+        for (var sd = 0; sd < 2; sd++) {
+          var sdir = sd === 0 ? "H" : "V";
+          var slens = pickLenCandidates(2, longCount < longCap);
+          for (var sl = 0; sl < slens.length; sl++) {
+            var sres = canPlaceGeom(sr, sc, sdir, slens[sl]);
+            if (sres && bboxGrowthCost(sr, sc, sdir, slens[sl]) === 0) {
+              var sslot = commitSlot(sr, sc, sdir, slens[sl], sres.crossings);
+              pushFrontier(sslot);
+              sweepChanged = true;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { slots: slots, slotsById: slotsById, crossings: crossings };
+}
+
+// ФАЗА 3 — CSP-заливка слотов словами банка: backtracking + MRV
+// (минимальный остаточный домен выбирается первым) + forward checking
+// (пропагирует букву на все ещё не назначенные пересекающиеся слоты,
+// сохраняя старый домен в trail для отката) + LCV (среди кандидатов
+// слота предпочитаем те, что оставляют больше вариантов соседям).
+function swSolveCSP(skeleton, byLength, budget) {
+  var slots = skeleton.slots, crossings = skeleton.crossings;
+  var domain = {};
+  slots.forEach(function (s) { domain[s.id] = (byLength[s.len] || []).slice(); });
+  var assigned = {}, localUsed = new Set();
+
+  function forwardCheck(sId, entry, trail) {
+    var word = entry.w, cs = crossings[sId] || [];
+    for (var k = 0; k < cs.length; k++) {
+      var cx = cs[k];
+      if (assigned[cx.other]) continue;
+      var needChar = word[cx.myIndex], od = domain[cx.other], kept = [];
+      for (var i = 0; i < od.length; i++) if (od[i].w[cx.otherIndex] === needChar) kept.push(od[i]);
+      if (!kept.length) return false;
+      trail.push({ slot: cx.other, original: od });
+      domain[cx.other] = kept;
+    }
+    return true;
+  }
+  function undoTrail(trail) { for (var i = trail.length - 1; i >= 0; i--) domain[trail[i].slot] = trail[i].original; }
+
+  function lcvOrder(id) {
+    var cs = crossings[id] || [];
+    return domain[id].map(function (e) {
+      var score = 0;
+      for (var k = 0; k < cs.length; k++) {
+        var cx = cs[k]; if (assigned[cx.other]) continue;
+        var ch = e.w[cx.myIndex], od = domain[cx.other];
+        for (var i = 0; i < od.length; i++) if (od[i].w[cx.otherIndex] === ch) score++;
+      }
+      return { e: e, score: score };
+    }).sort(function (a, b) { return b.score - a.score; }).map(function (x) { return x.e; });
+  }
+
+  var unassigned = slots.map(function (s) { return s.id; });
+  var steps = { n: budget };
+
+  function backtrack() {
+    if (steps.n-- <= 0) return false;
+    if (!unassigned.length) return true;
+    var bestIdx = -1, bestId = null, bestSize = Infinity;
+    for (var i = 0; i < unassigned.length; i++) {
+      var id = unassigned[i], sz = domain[id].length;
+      if (sz < bestSize) { bestSize = sz; bestId = id; bestIdx = i; }
+    }
+    if (bestSize === 0) return false;
+    unassigned.splice(bestIdx, 1);
+    var cands = lcvOrder(bestId).filter(function (e) { return !localUsed.has(e.w); });
+    for (var ci = 0; ci < cands.length; ci++) {
+      var entry = cands[ci];
+      assigned[bestId] = entry; localUsed.add(entry.w);
+      var trail = [];
+      if (forwardCheck(bestId, entry, trail) && backtrack()) return true;
+      undoTrail(trail);
+      delete assigned[bestId]; localUsed.delete(entry.w);
+      if (steps.n <= 0) break;
+    }
+    unassigned.splice(bestIdx, 0, bestId);
+    return false;
+  }
+
+  backtrack();
+  return { assigned: assigned, localUsed: localUsed };
+}
+
+// ФАЗА 4 — ремонт незакрытых слотов: сперва прямой поиск слова,
+// совместимого со всеми УЖЕ назначенными соседями; если пусто —
+// min-conflicts (переприсвоить соседа с наименьшей степенью и
+// пересобрать локально); если и это не помогает — слот УДАЛЯЕТСЯ из
+// партии целиком (не превращается в "blocked", просто минус одно слово).
+function swRepair(skeleton, byLength, solved) {
+  var slots = skeleton.slots, crossings = skeleton.crossings, slotsById = skeleton.slotsById;
+  var assigned = solved.assigned, localUsed = solved.localUsed;
+  var removed = {};
+
+  function candidatesFor(id) {
+    var s = slotsById[id], cs = crossings[id] || [];
+    return (byLength[s.len] || []).filter(function (e) {
+      if (localUsed.has(e.w)) return false;
+      for (var k = 0; k < cs.length; k++) {
+        var cx = cs[k];
+        if (removed[cx.other] || !assigned[cx.other]) continue;
+        if (assigned[cx.other].w[cx.otherIndex] !== e.w[cx.myIndex]) return false;
+      }
+      return true;
+    });
+  }
+
+  slots.forEach(function (s) {
+    if (assigned[s.id]) return;
+    var direct = candidatesFor(s.id);
+    if (direct.length) { assigned[s.id] = direct[0]; localUsed.add(direct[0].w); return; }
+
+    var cs = crossings[s.id] || [];
+    var neighbor = null, neighborDeg = Infinity;
+    cs.forEach(function (cx) {
+      if (!assigned[cx.other] || removed[cx.other]) return;
+      var deg = (crossings[cx.other] || []).length;
+      if (deg < neighborDeg) { neighborDeg = deg; neighbor = cx.other; }
+    });
+    var repaired = false;
+    if (neighbor !== null) {
+      var oldEntry = assigned[neighbor];
+      delete assigned[neighbor]; localUsed.delete(oldEntry.w);
+      var candsN = candidatesFor(neighbor);
+      for (var i = 0; i < candsN.length && !repaired; i++) {
+        assigned[neighbor] = candsN[i]; localUsed.add(candsN[i].w);
+        var direct2 = candidatesFor(s.id);
+        if (direct2.length) { assigned[s.id] = direct2[0]; localUsed.add(direct2[0].w); repaired = true; }
+        else { localUsed.delete(candsN[i].w); delete assigned[neighbor]; }
+      }
+      if (!repaired) { assigned[neighbor] = oldEntry; localUsed.add(oldEntry.w); }
+    }
+    if (!repaired) removed[s.id] = true;
+  });
+
+  return removed;
+}
+
+// ФАЗА 6 (рендер) — тот же формат/стиль сборки grid, что и у
+// generatePuzzleDense (merge H+V подсказок в одну clue-клетку и т.д.),
+// но строится ЗАНОВО из финального списка {slot,assigned} — поэтому
+// удалённые в repair() слоты просто не попадают в placed, без ручной
+// чистки cellSlot/clue-резерваций.
+function swBuildOutput(skeleton, assigned, removed) {
+  var placed = skeleton.slots
+    .filter(function (s) { return assigned[s.id] && !removed[s.id]; })
+    .map(function (s) { return { entry: assigned[s.id], r: s.r, c: s.c, dir: s.dir, len: s.len }; });
+  if (!placed.length) return { rows: 0, cols: 0, grid: [], words: [], wordCount: 0 };
+
+  var K = function (r, c) { return r + "," + c; };
+  var letters = new Map();
+  var minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+  placed.forEach(function (p) {
+    for (var i = 0; i < p.len; i++) {
+      var cr = p.dir === "H" ? p.r : p.r + i, cc = p.dir === "H" ? p.c + i : p.c;
+      var cell = letters.get(K(cr, cc));
+      if (!cell) { cell = { char: p.entry.w[i], h: false, v: false }; letters.set(K(cr, cc), cell); }
+      if (p.dir === "H") cell.h = true; else cell.v = true;
+      if (cr < minR) minR = cr; if (cr > maxR) maxR = cr;
+      if (cc < minC) minC = cc; if (cc > maxC) maxC = cc;
+    }
+  });
+  var clues = new Map();
+  placed.forEach(function (p, ix) {
+    var id = ix + 1;
+    var cr = p.dir === "H" ? p.r : p.r - 1, cc = p.dir === "H" ? p.c - 1 : p.c;
+    if (cr < minR) minR = cr; if (cr > maxR) maxR = cr;
+    if (cc < minC) minC = cc; if (cc > maxC) maxC = cc;
+    var k = K(cr, cc);
+    if (!clues.has(k)) clues.set(k, { H: null, V: null });
+    var slot = { text: p.entry.c, arrow: p.dir === "H" ? "right" : "down", wordId: id };
+    if (p.dir === "H") clues.get(k).H = slot; else clues.get(k).V = slot;
+  });
+  var rows = maxR - minR + 1, cols = maxC - minC + 1;
+  var grid = [];
+  for (var gr = 0; gr < rows; gr++) {
+    var row = [];
+    for (var gc = 0; gc < cols; gc++) {
+      var L = letters.get(K(gr + minR, gc + minC));
+      var CL = clues.get(K(gr + minR, gc + minC));
+      if (L) row.push({ type: "letter", char: L.char, wordIds: [] });
+      else if (CL) row.push({ type: "clue", H: CL.H, V: CL.V });
+      else row.push({ type: "blocked" });
+    }
+    grid.push(row);
+  }
+  var words = placed.map(function (p, ix) {
+    return { id: ix + 1, word: p.entry.w, clue: p.entry.c, dir: p.dir, r: p.r - minR, c: p.c - minC, len: p.len };
+  });
+  words.forEach(function (w) {
+    for (var i = 0; i < w.len; i++) {
+      var rr = w.dir === "H" ? w.r : w.r + i, cc = w.dir === "H" ? w.c + i : w.c;
+      grid[rr][cc].wordIds.push(w.id);
+    }
+  });
+  return { rows: rows, cols: cols, grid: grid, words: words, wordCount: words.length };
+}
+
+// ФАЗА 5 — защита от «слов-призраков»: сканирует КАЖДЫЙ максимальный ряд
+// letter-клеток длиной >=2 по горизонтали и вертикали и проверяет его
+// точное совпадение со словом словаря. bank по умолчанию — весь
+// WORD_BANK (глобальный словарь), а не урезанный пул партии: цель —
+// «это настоящее слово или мусор», а не «это слово ещё доступно».
+function fullScanAssert(puzzle, bank) {
+  if (!puzzle || !puzzle.grid || !puzzle.rows || !puzzle.cols) return false;
+  var words = bank || WORD_BANK;
+  var wordSet = new Set(words.map(function (e) { return typeof e === "string" ? e : e.w; }));
+  var rows = puzzle.rows, cols = puzzle.cols, grid = puzzle.grid;
+  function ok(run) { return run.length < 2 || wordSet.has(run); }
+  for (var r = 0; r < rows; r++) {
+    var run = "";
+    for (var c = 0; c <= cols; c++) {
+      var cell = c < cols ? grid[r][c] : null;
+      if (cell && cell.type === "letter") run += cell.char;
+      else { if (!ok(run)) return false; run = ""; }
+    }
+  }
+  for (var c2 = 0; c2 < cols; c2++) {
+    var run2 = "";
+    for (var r2 = 0; r2 <= rows; r2++) {
+      var cell2 = r2 < rows ? grid[r2][c2] : null;
+      if (cell2 && cell2.type === "letter") run2 += cell2.char;
+      else { if (!ok(run2)) return false; run2 = ""; }
+    }
+  }
+  return true;
+}
+
+// ФАЗА 7 — обёртки, сигнатура идентична generatePuzzleDense/DenseBest.
+function generatePuzzleSwedishDense(bank, opts) {
+  opts = opts || {};
+  var pool = bank.filter(function (e) { return e.w.length >= 3 && e.w.length <= 11; });
+  if (!pool.length) return { rows: 0, cols: 0, grid: [], words: [], wordCount: 0 };
+  var byLength = {};
+  pool.forEach(function (e) { (byLength[e.w.length] = byLength[e.w.length] || []).push(e); });
+  var budget = opts.cspBudget || 9000;
+
+  var skeleton = swBuildSkeleton(pool, opts);
+  if (!skeleton.slots.length) return { rows: 0, cols: 0, grid: [], words: [], wordCount: 0 };
+  var solved = swSolveCSP(skeleton, byLength, budget);
+  var removed = swRepair(skeleton, byLength, solved);
+  return swBuildOutput(skeleton, solved.assigned, removed);
+}
+
+function swScoreLess(a, b) {
+  for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return a[i] < b[i]; }
+  return false;
+}
+
+// Best-of-n по (blocked ↑, wordCount ↓, площадь bbox ↑); принимает
+// ТОЛЬКО партии, прошедшие fullScanAssert (жёсткий gate, а не рефакторинг
+// существующей проверки — такой проверки в коде раньше не было вообще).
+function generatePuzzleSwedishBest(bank, n, opts) {
+  opts = opts || {};
+  var minWords = opts.minWords || 25;
+  var best = null, bestScore = null;
+  for (var i = 0; i < n; i++) {
+    var p = generatePuzzleSwedishDense(bank, opts);
+    if (!p || p.wordCount < minWords) continue;
+    if (!fullScanAssert(p)) continue;
+    var blocked = 0;
+    for (var r = 0; r < p.rows; r++) for (var c = 0; c < p.cols; c++) if (p.grid[r][c].type === "blocked") blocked++;
+    var score = [blocked, -p.wordCount, p.rows * p.cols];
+    if (!best || swScoreLess(score, bestScore)) { best = p; bestScore = score; }
+  }
+  return best || generatePuzzleSwedishDense(bank, opts);
+}
+
+var ScanwordGen = {
+  WORD_BANK: WORD_BANK, ScanwordGenerator: ScanwordGenerator, generatePuzzle: generatePuzzle,
+  generatePuzzleDense: generatePuzzleDense, generatePuzzleDenseBest: generatePuzzleDenseBest,
+  generatePuzzleSwedishDense: generatePuzzleSwedishDense, generatePuzzleSwedishBest: generatePuzzleSwedishBest,
+  fullScanAssert: fullScanAssert
+};
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = ScanwordGen;

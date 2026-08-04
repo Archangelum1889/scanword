@@ -7,26 +7,26 @@
 
 const fs = require("fs");
 const path = require("path");
-const { WORD_BANK, generatePuzzleDenseBest } = require("../www/generator.js");
+const { WORD_BANK, generatePuzzleSwedishBest, fullScanAssert } = require("../www/generator.js");
 
 const MAX_PUZZLES = 40;      // потолок; реально упрёмся в размер банка
-const MAX_DIM = 20;          // как было — по 40–50 слов в партии (число слов НЕ урезать; юзер не просил)
-const ATTEMPTS = 18;         // попыток best-of на пазл
-const GEN_MIN_WORDS = 40;    // целевой минимум слов в пазле
-const MAX_BLANK = 0.46;      // не берём разреженные пазлы
+const MAX_DIM = 18;          // новый плотный движок держит ~18×18 при 40–50 словах
+const ATTEMPTS = 25;         // best-of (офлайн, дёшево) — берём минимум пустоты
+const GEN_MIN_WORDS = 40;    // целевой минимум слов в пазле (число слов НЕ урезаем)
+const MAX_BLANK = 0.44;      // ранние партии плотные ~32%; хвост допускаем до 44% ради числа партий
 const POOL_STOP = 45;        // с банком 1199 хватает на больше партий
 
 const remaining = WORD_BANK.slice();
 const puzzles = [];
 let fails = 0;   // подряд неудачных генераций (плохое качество)
 
-while (puzzles.length < MAX_PUZZLES && remaining.length >= POOL_STOP && fails < 5) {
-  const puzzle = generatePuzzleDenseBest(remaining, ATTEMPTS, { maxDim: MAX_DIM, minWords: GEN_MIN_WORDS });
+while (puzzles.length < MAX_PUZZLES && remaining.length >= POOL_STOP && fails < 12) {
+  const puzzle = generatePuzzleSwedishBest(remaining, ATTEMPTS, { maxDim: MAX_DIM, minWords: GEN_MIN_WORDS });
   let bl = 0, cells = puzzle ? puzzle.rows * puzzle.cols : 1;
   if (puzzle) for (const row of puzzle.grid) for (const c of row) if (c.type === "blocked") bl++;
-  // мелкий/разреженный вариант — это случайная неудача (или пул выеден): повторяем,
+  // мелкий/разреженный вариант или «слово-призрак» — неудача: повторяем,
   // а не останавливаемся; стоп только после нескольких неудач подряд
-  if (!puzzle || puzzle.wordCount < GEN_MIN_WORDS || (bl / cells) > MAX_BLANK) { fails++; continue; }
+  if (!puzzle || puzzle.wordCount < GEN_MIN_WORDS || (bl / cells) > MAX_BLANK || !fullScanAssert(puzzle)) { fails++; continue; }
   fails = 0;
   const id = puzzles.length + 1;
   puzzles.push(Object.assign({ id: id, number: id }, puzzle));
