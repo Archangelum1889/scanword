@@ -375,6 +375,24 @@ function scrollToSelection() {
   }
 }
 
+// Докрутить поле за курсором при вводе букв: на зуме активная клетка уезжает за край,
+// иначе приходится двигать камеру вручную. Скроллим ТОЛЬКО когда курсор подходит к краю
+// (запас ~1.4 клетки), минимально и плавно — «камера следует».
+function scrollCursorIntoView() {
+  if (!game.cursor) return;
+  const el = boardEl.querySelector('.cell[data-r="' + game.cursor[0] + '"][data-c="' + game.cursor[1] + '"]');
+  const wrap = document.getElementById("boardWrap");
+  if (!el || !wrap) return;
+  const er = el.getBoundingClientRect(), wr = wrap.getBoundingClientRect();
+  const margin = Math.min(er.width * 1.4, wr.width * 0.3, wr.height * 0.3);
+  let dx = 0, dy = 0;
+  if (er.right > wr.right - margin) dx = er.right - (wr.right - margin);
+  else if (er.left < wr.left + margin) dx = er.left - (wr.left + margin);
+  if (er.bottom > wr.bottom - margin) dy = er.bottom - (wr.bottom - margin);
+  else if (er.top < wr.top + margin) dy = er.top - (wr.top + margin);
+  if (dx || dy) wrap.scrollBy({ left: dx, top: dy, behavior: "smooth" });
+}
+
 function selectWordAt(id, rc) {
   game.selectedWordId = id;
   game.cursor = rc;
@@ -688,6 +706,7 @@ function typeLetter(ch) {
     if (crossId != null) { selectWordAt(crossId, [r, c]); jumped = true; }
   }
   afterInput(w, jumped);
+  scrollCursorIntoView();
 }
 
 function backspace() {
@@ -711,6 +730,7 @@ function backspace() {
     }
   }
   renderSelection();
+  scrollCursorIntoView();
   updateClueSolvedStyles();
   updateProgressLabel();
 }

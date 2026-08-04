@@ -475,7 +475,7 @@ button { font-family: inherit; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 4px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  padding: 8px 4px calc(env(safe-area-inset-bottom, 0px) + 22px);
   background: var(--sw-bg, #eceef2);
 }
 
