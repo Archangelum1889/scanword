@@ -25,7 +25,40 @@ function loadProgress() {
   try { return JSON.parse(localStorage.getItem(PROGRESS_KEY)) || {}; }
   catch (e) { return {}; }
 }
-function saveProgress() { localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress)); }
+// Telegram CloudStorage только если реально поддерживается (Bot API ≥ 6.9),
+// иначе SDK сыплет ошибками «not supported in version …»
+function tgCloud() {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast("6.9")) return tg.CloudStorage;
+  return null;
+}
+
+function saveProgress() {
+  const json = JSON.stringify(progress);
+  try { localStorage.setItem(PROGRESS_KEY, json); } catch (e) {}
+  // Бэкап в Telegram CloudStorage — переживает переустановку/смену устройства
+  const cs = tgCloud();
+  if (cs) { try { cs.setItem(PROGRESS_KEY, json, function () {}); } catch (e) {} }
+}
+
+// Подтянуть прогресс из облака Telegram при старте (асинхронно) и перерисовать
+function cloudLoadProgress() {
+  const cs = tgCloud();
+  if (!cs) return;
+  try {
+    cs.getItem(PROGRESS_KEY, function (err, val) {
+      if (err || !val) return;
+      try {
+        const cloud = JSON.parse(val);
+        if (cloud && typeof cloud === "object") {
+          progress = cloud;
+          try { localStorage.setItem(PROGRESS_KEY, val); } catch (e) {}
+          if (game) renderBoard();
+        }
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
 
 let settings = loadSettings();
 let progress = loadProgress(); // { [puzzleId]: { filled: {"r,c":"Ч"}, completed:bool } }
@@ -216,6 +249,15 @@ function isWordSolved(w) {
   return isWordSolvedIn(game.puzzle, progress[game.puzzle.id], w);
 }
 
+// Клетка «заблокирована» = в режиме phone в ней уже стоит ВЕРНАЯ буква.
+// Такую нельзя стирать/перезаписывать (иначе можно сломать уже отгаданное).
+function isCellLocked(r, c) {
+  if (settings.mode !== "phone") return false;
+  const cd = game.puzzle.grid[r][c];
+  if (!cd || cd.type !== "letter") return false;
+  return progress[game.puzzle.id].filled[r + "," + c] === cd.char;
+}
+
 function firstUnfilledCell(w) {
   const prog = progress[game.puzzle.id];
   const cells = wordCells(w);
@@ -256,8 +298,22 @@ function selectWord(id) {
   const w = currentWord();
   game.cursor = w ? firstUnfilledCell(w) : null;
   renderSelection();
+  scrollToSelection();
   updateClueBar();
   document.getElementById("keyboard").classList.remove("hidden");
+}
+
+// Прокрутить поле так, чтобы выбранное слово было видно (важно на зуме, когда
+// клетка-подсказка за пределами экрана — иначе выбор «ничего не делает»).
+function scrollToSelection() {
+  const w = currentWord();
+  if (!w) return;
+  const slot = boardEl.querySelector('.slot[data-word-id="' + w.id + '"]');
+  const target = slot ? slot.closest(".cell")
+    : boardEl.querySelector('.cell[data-r="' + w.r + '"][data-c="' + w.c + '"]');
+  if (target && target.scrollIntoView) {
+    target.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
+  }
 }
 
 function selectWordAt(id, rc) {
@@ -494,12 +550,14 @@ function updateClueSolvedStyles() {
 
 // ---------- Ввод ----------
 function setLetter(r, c, ch) {
+  if (isCellLocked(r, c)) return;   // не перезаписываем отгаданное
   progress[game.puzzle.id].filled[r + "," + c] = ch;
   saveProgress();
   renderCellContent(r, c);
 }
 
 function clearLetter(r, c) {
+  if (isCellLocked(r, c)) return;   // не стираем отгаданное
   delete progress[game.puzzle.id].filled[r + "," + c];
   saveProgress();
   renderCellContent(r, c);
@@ -511,16 +569,21 @@ function typeLetter(ch) {
   const cells = wordCells(w);
   let idx = cellIndexAt(cells, game.cursor);
   if (idx === -1) idx = 0;
+  // пропускаем уже отгаданные (заблокированные) клетки
+  while (idx < cells.length && isCellLocked(cells[idx][0], cells[idx][1])) idx++;
+  if (idx >= cells.length) return;  // всё слово уже отгадано
   const [r, c] = cells[idx];
   setLetter(r, c, ch);
 
+  // курсор → следующая НЕзаблокированная клетка
+  let next = idx + 1;
+  while (next < cells.length && isCellLocked(cells[next][0], cells[next][1])) next++;
   let jumped = false;
-  if (idx < cells.length - 1) {
-    game.cursor = cells[idx + 1];
+  if (next < cells.length) {
+    game.cursor = cells[next];
     renderSelection();
   } else if (settings.jumpOnIntersection) {
-    // «переходить к следующему слову на пересечении»: слово дописано до конца
-    // на клетке, которая делится с другим словом — продолжаем без лишнего клика
+    // слово дописано до конца на общей клетке — продолжаем на пересекающем слове
     const crossId = otherWordAt(r, c, w.id);
     if (crossId != null) { selectWordAt(crossId, [r, c]); jumped = true; }
   }
@@ -531,17 +594,21 @@ function backspace() {
   const w = currentWord();
   if (!w) return;
   const cells = wordCells(w);
+  const filled = progress[game.puzzle.id].filled;
+  const editable = (i) => !isCellLocked(cells[i][0], cells[i][1]);
+  const hasLetter = (i) => !!filled[cells[i][0] + "," + cells[i][1]];
   let idx = cellIndexAt(cells, game.cursor);
   if (idx === -1) idx = cells.length - 1;
-  const [r, c] = cells[idx];
-  const key = r + "," + c;
-  if (progress[game.puzzle.id].filled[key]) {
-    clearLetter(r, c);
-  } else if (idx > 0) {
-    idx--;
-    game.cursor = cells[idx];
-    const [pr, pc] = cells[idx];
-    clearLetter(pr, pc);
+  if (hasLetter(idx) && editable(idx)) {
+    clearLetter(cells[idx][0], cells[idx][1]);
+  } else {
+    // шаг назад к ближайшей РЕДАКТИРУЕМОЙ клетке (пропуская отгаданные) и стираем
+    let j = idx - 1;
+    while (j >= 0 && !editable(j)) j--;
+    if (j >= 0) {
+      game.cursor = cells[j];
+      if (hasLetter(j)) clearLetter(cells[j][0], cells[j][1]);
+    }
   }
   renderSelection();
   updateClueSolvedStyles();
@@ -659,6 +726,7 @@ function initTelegram() {
     tg.expand();
     if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
     if (tg.setHeaderColor) tg.setHeaderColor("#c7b6a2");   // под фон доски
+    cloudLoadProgress();   // подтянуть сохранённый прогресс из облака
   } catch (e) {}
 }
 
