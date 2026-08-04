@@ -52,12 +52,33 @@ function cloudLoadProgress() {
         const cloud = JSON.parse(val);
         if (cloud && typeof cloud === "object") {
           progress = cloud;
-          try { localStorage.setItem(PROGRESS_KEY, val); } catch (e) {}
+          pruneProgressToSolved();
           if (game) renderBoard();
         }
       } catch (e) {}
     });
   } catch (e) {}
+}
+
+// Запоминаем ТОЛЬКО собранные слова: выкидываем из прогресса все буквы, не
+// входящие ни в одно полностью решённое слово (иначе при перезаходе висят
+// разрозненные буквы «где попало»). Прогон по всем пазлам, затем сохранение.
+function pruneProgressToSolved() {
+  if (!PUZZLES || !PUZZLES.length) return;
+  for (const p of PUZZLES) {
+    const prog = progress[p.id];
+    if (!prog || !prog.filled) continue;
+    const keep = {};
+    for (const w of p.words) {
+      if (!isWordSolvedIn(p, prog, w)) continue;
+      for (const cell of wordCells(w)) {
+        const k = cell[0] + "," + cell[1];
+        keep[k] = prog.filled[k];
+      }
+    }
+    prog.filled = keep;
+  }
+  saveProgress();
 }
 
 let settings = loadSettings();
@@ -249,13 +270,17 @@ function isWordSolved(w) {
   return isWordSolvedIn(game.puzzle, progress[game.puzzle.id], w);
 }
 
-// Клетка «заблокирована» = в режиме phone в ней уже стоит ВЕРНАЯ буква.
-// Такую нельзя стирать/перезаписывать (иначе можно сломать уже отгаданное).
+// Клетка «заблокирована» = в режиме phone входит в ПОЛНОСТЬЮ собранное слово.
+// Такую нельзя стирать/перезаписывать. Одиночные верные буквы в недособранном
+// слове НЕ блокируем — их можно свободно менять.
 function isCellLocked(r, c) {
   if (settings.mode !== "phone") return false;
   const cd = game.puzzle.grid[r][c];
   if (!cd || cd.type !== "letter") return false;
-  return progress[game.puzzle.id].filled[r + "," + c] === cd.char;
+  return (cd.wordIds || []).some(function (id) {
+    const w = game.puzzle.words.find(function (x) { return x.id === id; });
+    return w && isWordSolved(w);
+  });
 }
 
 function firstUnfilledCell(w) {
@@ -740,6 +765,7 @@ async function init() {
   } catch (e) {
     PUZZLES = [];
   }
+  pruneProgressToSolved();   // при заходе оставить только собранные слова
   showScreen("screen-menu");
 }
 
