@@ -367,6 +367,13 @@ button { font-family: inherit; }
   overflow: hidden;
 }
 
+/* Запасной перенос ПО БУКВАМ — включается из JS (fitClueFonts), когда одно
+   длинное слово не влезает по ширине ни при каком кегле. Лучше перенос, чем обрезка. */
+.cell.clue .ctext.brk {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
 .cell.clue .slot.solved .ctext { color: rgba(255,255,255,0.55); }
 
 /* Стрелка позиционируется относительно КЛЕТКИ (slot не position:relative),

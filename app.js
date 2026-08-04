@@ -497,20 +497,31 @@ function renderBoard() {
 function fitClueFonts() {
   const cell = currentCellSize;
   const maxF = cell * 0.30;
-  const minF = Math.max(5, cell * 0.13);
+  const minF = Math.max(5, cell * 0.11);
   boardEl.querySelectorAll(".cell.clue .slot").forEach((slot) => {
     const t = slot.querySelector(".ctext");
     if (!t || !slot.clientHeight) return;
-    let lo = minF, hi = maxF, best = minF;
-    for (let i = 0; i < 8; i++) {
-      const mid = (lo + hi) / 2;
-      t.style.fontSize = mid.toFixed(2) + "px";
-      const fits = t.scrollWidth <= t.clientWidth + 0.5 &&
-                   t.scrollHeight <= slot.clientHeight + 0.5;
-      if (fits) { best = mid; lo = mid; } else { hi = mid; }
+    t.classList.remove("brk");
+    fitCtext(t, slot, minF, maxF);
+    // если ОДНО слово всё равно шире клетки (не влезает ни при каком кегле) —
+    // разрешаем перенос ПО БУКВАМ и подгоняем заново, чтобы текст НЕ обрезался
+    if (t.scrollWidth > t.clientWidth + 0.5) {
+      t.classList.add("brk");
+      fitCtext(t, slot, minF, maxF);
     }
-    t.style.fontSize = best.toFixed(2) + "px";
   });
+}
+
+function fitCtext(t, slot, minF, maxF) {
+  let lo = minF, hi = maxF, best = minF;
+  for (let i = 0; i < 9; i++) {
+    const mid = (lo + hi) / 2;
+    t.style.fontSize = mid.toFixed(2) + "px";
+    const fits = t.scrollWidth <= t.clientWidth + 0.5 &&
+                 t.scrollHeight <= slot.clientHeight + 0.5;
+    if (fits) { best = mid; lo = mid; } else { hi = mid; }
+  }
+  t.style.fontSize = best.toFixed(2) + "px";
 }
 
 function makeClueSlot(info, axis) {
