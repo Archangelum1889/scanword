@@ -381,13 +381,33 @@ function applyCellSize() {
   document.documentElement.style.setProperty("--cell-size", currentCellSize + "px");
 }
 
-// Единая точка изменения масштаба: клампим в пределы и пересчитываем кегль
-function setCellSize(px) {
-  currentCellSize = Math.max(CELL_MIN, Math.min(CELL_MAX, Math.round(px)));
+// Масштаб с ФОКУСОМ: точка (fx,fy) относительно boardWrap остаётся на месте при
+// зуме — иначе поле «уезжает» и приближает не туда, куда целишься.
+function zoomTo(next, fx, fy, doFit) {
+  next = Math.max(CELL_MIN, Math.min(CELL_MAX, Math.round(next)));
+  var wrap = document.getElementById("boardWrap");
+  var old = currentCellSize || 1;
+  if (next === old) return;
+  var cs = getComputedStyle(wrap);
+  var pl = parseFloat(cs.paddingLeft) || 0, pt = parseFloat(cs.paddingTop) || 0;
+  var s0L = wrap.scrollLeft, s0T = wrap.scrollTop;
+  var scale = next / old;
+  currentCellSize = next;
   applyCellSize();
-  if (game) fitClueFonts();
+  // паддинг поля не масштабируется — учитываем его, чтобы точка под фокусом не уезжала
+  wrap.scrollLeft = pl + (s0L + fx - pl) * scale - fx;
+  wrap.scrollTop = pt + (s0T + fy - pt) * scale - fy;
+  if (doFit && game) fitClueFonts();
 }
-function zoomBy(step) { setCellSize(currentCellSize + step); }
+
+// Кнопки/колесо: без явного фокуса — зумим к центру видимой области
+function setCellSize(px, focal) {
+  var wrap = document.getElementById("boardWrap");
+  var fx = focal ? focal.x : wrap.clientWidth / 2;
+  var fy = focal ? focal.y : wrap.clientHeight / 2;
+  zoomTo(px, fx, fy, true);
+}
+function zoomBy(step, focal) { setCellSize(currentCellSize + step, focal); }
 
 document.getElementById("zoomInBtn").addEventListener("click", function () { zoomBy(6); });
 document.getElementById("zoomOutBtn").addEventListener("click", function () { zoomBy(-6); });
@@ -420,8 +440,12 @@ function wirePinchZoom() {
     if (e.touches.length === 2 && pinchStartDist) {
       e.preventDefault();
       const ratio = touchDistance(e.touches) / pinchStartDist;
-      currentCellSize = Math.max(CELL_MIN, Math.min(CELL_MAX, Math.round(pinchStartSize * ratio)));
-      applyCellSize();
+      const next = Math.max(CELL_MIN, Math.min(CELL_MAX, Math.round(pinchStartSize * ratio)));
+      // фокус = ТЕКУЩАЯ середина между пальцами (относительно поля) — зумим туда
+      const rect = wrap.getBoundingClientRect();
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+      const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+      zoomTo(next, mx, my, false);   // без fitClueFonts — тяжело каждый кадр
     }
   }, { passive: false });
 
@@ -433,7 +457,8 @@ function wirePinchZoom() {
   wrap.addEventListener("wheel", (e) => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
-      zoomBy(e.deltaY < 0 ? 4 : -4);
+      const rect = wrap.getBoundingClientRect();
+      zoomBy(e.deltaY < 0 ? 4 : -4, { x: e.clientX - rect.left, y: e.clientY - rect.top });
     }
   }, { passive: false });
 
