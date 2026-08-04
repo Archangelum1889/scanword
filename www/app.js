@@ -433,6 +433,17 @@ function applyCellSize() {
   document.documentElement.style.setProperty("--cell-size", currentCellSize + "px");
 }
 
+// Паддинг boardWrap постоянен — кешируем, чтобы не звать getComputedStyle (форс-рефлоу)
+// на каждый кадр пинча. Сбрасываем на ресайзе.
+var _wrapPad = null;
+function wrapPad() {
+  if (_wrapPad) return _wrapPad;
+  var cs = getComputedStyle(document.getElementById("boardWrap"));
+  _wrapPad = { l: parseFloat(cs.paddingLeft) || 0, t: parseFloat(cs.paddingTop) || 0 };
+  return _wrapPad;
+}
+window.addEventListener("resize", function () { _wrapPad = null; });
+
 // Масштаб с ФОКУСОМ: точка (fx,fy) относительно boardWrap остаётся на месте при
 // зуме — иначе поле «уезжает» и приближает не туда, куда целишься.
 function zoomTo(next, fx, fy, doFit) {
@@ -440,8 +451,8 @@ function zoomTo(next, fx, fy, doFit) {
   var wrap = document.getElementById("boardWrap");
   var old = currentCellSize || 1;
   if (next === old) return;
-  var cs = getComputedStyle(wrap);
-  var pl = parseFloat(cs.paddingLeft) || 0, pt = parseFloat(cs.paddingTop) || 0;
+  var pad = wrapPad();
+  var pl = pad.l, pt = pad.t;
   var s0L = wrap.scrollLeft, s0T = wrap.scrollTop;
   var scale = next / old;
   currentCellSize = next;
@@ -460,6 +471,19 @@ function setCellSize(px, focal) {
   zoomTo(px, fx, fy, true);
 }
 function zoomBy(step, focal) { setCellSize(currentCellSize + step, focal); }
+
+// Коалесценция зума: тач-события летят чаще кадра — копим последний таргет и применяем
+// ОДИН раз за кадр (rAF). Иначе несколько полных релэйаутов сетки за кадр = джанк.
+var _zoomPend = null, _zoomRAF = 0;
+function scheduleZoom(next, fx, fy) {
+  _zoomPend = [next, fx, fy];
+  if (_zoomRAF) return;
+  _zoomRAF = requestAnimationFrame(function () {
+    _zoomRAF = 0;
+    var p = _zoomPend; _zoomPend = null;
+    if (p) zoomTo(p[0], p[1], p[2], false);
+  });
+}
 
 document.getElementById("zoomInBtn").addEventListener("click", function () { zoomBy(6); });
 document.getElementById("zoomOutBtn").addEventListener("click", function () { zoomBy(-6); });
@@ -497,7 +521,7 @@ function wirePinchZoom() {
       const rect = wrap.getBoundingClientRect();
       const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
       const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
-      zoomTo(next, mx, my, false);   // без fitClueFonts — тяжело каждый кадр
+      scheduleZoom(next, mx, my);   // 1 релэйаут за кадр (rAF), без fitClueFonts
     }
   }, { passive: false });
 
