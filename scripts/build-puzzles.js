@@ -10,11 +10,11 @@ const path = require("path");
 const { WORD_BANK, generatePuzzleDenseBest } = require("../www/generator.js");
 
 const MAX_PUZZLES = 40;      // потолок; реально упрёмся в размер банка
-const MAX_DIM = 14;          // КОМПАКТНАЯ сетка (~15×14) — меньше пустого места (юзер: «много свободного места»)
-const ATTEMPTS = 30;         // мелкие сетки быстрые → больше попыток на минимум пустот
-const GEN_MIN_WORDS = 24;    // целевой минимум слов (компактная сетка держит ~26)
-const MAX_BLANK = 0.42;      // не берём разреженные пазлы
-const POOL_STOP = 35;        // с банком 1199 хватает на больше партий
+const MAX_DIM = 20;          // как было — по 40–50 слов в партии (число слов НЕ урезать; юзер не просил)
+const ATTEMPTS = 18;         // попыток best-of на пазл
+const GEN_MIN_WORDS = 40;    // целевой минимум слов в пазле
+const MAX_BLANK = 0.46;      // не берём разреженные пазлы
+const POOL_STOP = 45;        // с банком 1199 хватает на больше партий
 
 const remaining = WORD_BANK.slice();
 const puzzles = [];
