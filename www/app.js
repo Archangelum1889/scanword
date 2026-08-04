@@ -33,28 +33,62 @@ function tgCloud() {
   return null;
 }
 
+// Облако: ОТДЕЛЬНЫЙ ключ на журнал (sw_p_<id>, ~1КБ) → лимит 4КБ/ключ не грозит,
+// даже если заполнить все журналы целиком.
+const CLOUD_PREFIX = "sw_p_";
+
 function saveProgress() {
-  const json = JSON.stringify(progress);
-  try { localStorage.setItem(PROGRESS_KEY, json); } catch (e) {}
-  // Бэкап в Telegram CloudStorage — переживает переустановку/смену устройства
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress)); } catch (e) {}
+  // в облако пишем ТОЛЬКО ключ текущего журнала (правки идут по нему)
   const cs = tgCloud();
-  if (cs) { try { cs.setItem(PROGRESS_KEY, json, function () {}); } catch (e) {} }
+  if (cs && game && game.puzzle) {
+    const id = game.puzzle.id;
+    try { cs.setItem(CLOUD_PREFIX + id, JSON.stringify(progress[id] || {}), function () {}); } catch (e) {}
+  }
 }
 
-// Подтянуть прогресс из облака Telegram при старте (асинхронно) и перерисовать
+function applyCloudProgress(cloud) {
+  progress = cloud;
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress)); } catch (e) {}
+  pruneProgressToSolved();
+  if (game) renderBoard();
+}
+
+// Подтянуть прогресс из облака Telegram при старте (по ключу на журнал)
 function cloudLoadProgress() {
   const cs = tgCloud();
-  if (!cs) return;
+  if (!cs || !cs.getKeys) return;
+  try {
+    cs.getKeys(function (err, keys) {
+      if (err || !keys) return;
+      const pk = keys.filter(function (k) { return k.indexOf(CLOUD_PREFIX) === 0; });
+      if (!pk.length) { cloudMigrateOldKey(cs); return; }
+      cs.getItems(pk, function (err2, items) {
+        if (err2 || !items) return;
+        const cloud = {};
+        pk.forEach(function (k) {
+          const id = k.slice(CLOUD_PREFIX.length);
+          try { const v = JSON.parse(items[k]); if (v && typeof v === "object") cloud[id] = v; } catch (e) {}
+        });
+        if (Object.keys(cloud).length) applyCloudProgress(cloud);
+      });
+    });
+  } catch (e) {}
+}
+
+// Миграция: старое облако держало весь прогресс в ОДНОМ ключе — разложим по журналам
+function cloudMigrateOldKey(cs) {
   try {
     cs.getItem(PROGRESS_KEY, function (err, val) {
       if (err || !val) return;
       try {
         const cloud = JSON.parse(val);
-        if (cloud && typeof cloud === "object") {
-          progress = cloud;
-          pruneProgressToSolved();
-          if (game) renderBoard();
-        }
+        if (!cloud || typeof cloud !== "object") return;
+        applyCloudProgress(cloud);
+        Object.keys(cloud).forEach(function (id) {
+          try { cs.setItem(CLOUD_PREFIX + id, JSON.stringify(cloud[id] || {}), function () {}); } catch (e) {}
+        });
+        try { cs.removeItem(PROGRESS_KEY, function () {}); } catch (e) {}
       } catch (e) {}
     });
   } catch (e) {}
