@@ -397,7 +397,7 @@ function zoomTo(next, fx, fy, doFit) {
   // паддинг поля не масштабируется — учитываем его, чтобы точка под фокусом не уезжала
   wrap.scrollLeft = pl + (s0L + fx - pl) * scale - fx;
   wrap.scrollTop = pt + (s0T + fy - pt) * scale - fy;
-  if (doFit && game) fitClueFonts();
+  // fitClueFonts на зуме НЕ вызываем — текст масштабируется через CSS сам
 }
 
 // Кнопки/колесо: без явного фокуса — зумим к центру видимой области
@@ -450,7 +450,8 @@ function wirePinchZoom() {
   }, { passive: false });
 
   wrap.addEventListener("touchend", (e) => {
-    if (e.touches.length < 2) { pinchStartDist = null; if (game) fitClueFonts(); }
+    // кегль пересчитывать НЕ нужно — текст масштабируется через CSS (calc от --cell-size)
+    if (e.touches.length < 2) { pinchStartDist = null; }
   }, { passive: true });
 
   // Десктоп: Ctrl/⌘ + колесо = зум поля (без модификатора — обычная прокрутка)
@@ -527,13 +528,16 @@ function fitClueFonts() {
     const t = slot.querySelector(".ctext");
     if (!t || !slot.clientHeight) return;
     t.classList.remove("brk");
-    fitCtext(t, slot, minF, maxF);
+    let best = fitCtext(t, slot, minF, maxF);
     // если ОДНО слово всё равно шире клетки (не влезает ни при каком кегле) —
     // разрешаем перенос ПО БУКВАМ и подгоняем заново, чтобы текст НЕ обрезался
     if (t.scrollWidth > t.clientWidth + 0.5) {
       t.classList.add("brk");
-      fitCtext(t, slot, minF, maxF);
+      best = fitCtext(t, slot, minF, maxF);
     }
+    // Кегль ХРАНИМ КАК ДОЛЮ от --cell-size → при зуме текст масштабируется ПЛАВНО
+    // через CSS вместе с клетками, без JS-пересчёта и «скачков» (не режет глаз).
+    t.style.fontSize = "calc(var(--cell-size, 42px) * " + (best / cell).toFixed(4) + ")";
   });
 }
 
@@ -546,7 +550,8 @@ function fitCtext(t, slot, minF, maxF) {
                  t.scrollHeight <= slot.clientHeight + 0.5;
     if (fits) { best = mid; lo = mid; } else { hi = mid; }
   }
-  t.style.fontSize = best.toFixed(2) + "px";
+  t.style.fontSize = best.toFixed(2) + "px";   // временно в px — для замера .brk
+  return best;
 }
 
 function makeClueSlot(info, axis) {
